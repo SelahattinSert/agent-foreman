@@ -8,6 +8,22 @@ CLI flags → project config → selected profile → global config → safe def
 
 The global file is `$XDG_CONFIG_HOME/agent-foreman/config.toml` (normally `~/.config/agent-foreman/config.toml`) on Linux, `~/Library/Application Support/Agent Foreman/config.toml` on macOS, and `%APPDATA%\Agent Foreman\config.toml` on Windows. Project settings live in `<project>/.agent-foreman/config.toml`. Writes are atomic and user-only where the platform supports modes.
 
+## Global profile wizard
+
+Run the terminal settings UI instead of editing TOML or remembering profile flags:
+
+```sh
+af settings
+af profile list
+codex agent-foreman
+```
+
+`af settings` opens the global profile wizard only in an interactive terminal. It writes nothing until both configured providers have been checked and you choose **Save global profile**. A failed check blocks saving; a warning requires a separate confirmation. In pipes and CI, the same command prints the redacted effective configuration and never writes a file.
+
+The wizard selects or creates a named global profile, chooses a supported supervisor and worker, accepts exact model IDs, discovers worker models when the installed adapter advertises that capability, and displays provider health before review. It has no secret input fields. Arrow keys select, Enter continues, Backspace edits text, and Escape cancels without writing. `NO_COLOR=1` and `INK_SCREEN_READER=true` remain supported.
+
+When an interactive task starts without an explicit supervisor or worker model, Agent Foreman opens the same wizard before it creates a session or calls a provider. The saved global profile is selected for that invocation. Project configuration is never silently rewritten; normal precedence remains CLI flags → project config → selected global profile → global config → safe defaults.
+
 ## Working example
 
 ```toml
@@ -96,7 +112,7 @@ af provider doctor
 af provider models worker
 ```
 
-Worker model discovery is used only when the installed CLI advertises it. Codex Exec does not expose a validated model-list command in the supported transport, so its exact configured value is exercised by health/runtime invocation and errors rather than silently replaced.
+Worker model discovery is used only when the installed CLI advertises it. Codex Exec does not expose a validated model-list command in the supported transport, so the wizard requires an exact manual value and reports a warning that needs separate confirmation. The entered value is preserved for provider runtime validation and is never silently replaced.
 
 ## Gates
 

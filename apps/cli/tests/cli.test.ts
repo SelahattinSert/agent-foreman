@@ -23,6 +23,7 @@ describe('Agent Foreman CLI', () => {
     const dependencies = {
       frontendProvider: 'codex',
       runReal,
+      runSettings: vi.fn(() => Promise.resolve()),
       resumeTask: vi.fn(async () => undefined),
       write: vi.fn(),
     };
@@ -51,6 +52,7 @@ describe('Agent Foreman CLI', () => {
     const program = createCliProgram({
       frontendProvider: 'standalone',
       runReal,
+      runSettings: vi.fn(() => Promise.resolve()),
       resumeTask: vi.fn(async () => undefined),
       write: (message) => output.push(message),
     });
@@ -69,6 +71,7 @@ describe('Agent Foreman CLI', () => {
     const program = createCliProgram({
       frontendProvider: 'standalone',
       runReal: vi.fn(async () => undefined),
+      runSettings: vi.fn(() => Promise.resolve()),
       resumeTask: vi.fn(async () => undefined),
       write: vi.fn(),
     });
@@ -98,5 +101,22 @@ describe('Agent Foreman CLI', () => {
       worker: {provider: 'antigravity-cli', model: 'worker-model'},
     });
     vi.unstubAllEnvs();
+  });
+
+  test('routes settings through the injected terminal-aware entry point', async () => {
+    const runReal = vi.fn(() => Promise.resolve());
+    const runSettings = vi.fn(() => Promise.resolve());
+    const dependencies = {
+      frontendProvider: 'standalone',
+      runReal,
+      runSettings,
+      resumeTask: vi.fn(() => Promise.resolve()),
+      write: vi.fn(),
+    };
+
+    await createCliProgram(dependencies).parseAsync(['settings'], {from: 'user'});
+
+    expect(runSettings).toHaveBeenCalledOnce();
+    expect(runReal).not.toHaveBeenCalled();
   });
 });

@@ -25,12 +25,11 @@ import {resumeApplyWorkflow} from '../workflow/resume-apply-workflow.js';
 import {resumeExecutionWorkflow} from '../workflow/resume-execution-workflow.js';
 import {resumePlanningWorkflow} from '../workflow/resume-planning-workflow.js';
 import {
-  createRuntimeSupervisor,
-  createRuntimeWorker,
   resolveQualityGateDefinitions,
   resolveWorkspaceExecutionMode,
   runtimeEnvironmentAllowlist,
 } from './real-run.js';
+import {createRuntimeSupervisor, createRuntimeWorker} from './runtime-providers.js';
 
 const openStore = async (): Promise<SqliteWorkflowStore> => {
   const paths = getAgentForemanPlatformPaths();

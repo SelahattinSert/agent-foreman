@@ -2,20 +2,11 @@ import {randomUUID} from 'node:crypto';
 import path from 'node:path';
 import {createInterface} from 'node:readline/promises';
 
-import {
-  loadResolvedConfig,
-  type QualityGateConfig,
-  type ResolvedConfig,
-} from '@agent-foreman/config';
+import type {QualityGateConfig, ResolvedConfig} from '@agent-foreman/config';
 import type {QualityGateReport, TaskSession, WorkflowEventRecord} from '@agent-foreman/contracts';
 import {ConfigurationError, transitionWorkflow} from '@agent-foreman/core';
 import {SqliteWorkflowStore} from '@agent-foreman/persistence';
 import {getAgentForemanPlatformPaths} from '@agent-foreman/process';
-import {CodexSupervisorProvider} from '@agent-foreman/provider-codex-cli';
-import {
-  AntigravityCliWorkerProvider,
-  GeminiCliWorkerProvider,
-} from '@agent-foreman/provider-gemini-cli';
 import type {ProviderExecutionContext} from '@agent-foreman/provider-sdk';
 import {
   discoverQualityGates,
@@ -37,6 +28,8 @@ import {PlainWorkflowInteraction} from '../workflow/plain-interaction.js';
 import {summarizeRepository} from '../workflow/repository-summary.js';
 import {runRealWorkflow, type RealWorkflowInteraction} from '../workflow/run-real-workflow.js';
 import {createInkWorkflowInteraction, type InkWorkflowHandle} from '../tui/workflow-tui.js';
+import {createRuntimeSupervisor, createRuntimeWorker} from './runtime-providers.js';
+import {ensureConfiguredProfile} from './settings.js';
 
 export interface RealRunCliOptions {
   readonly plain?: boolean;
@@ -50,88 +43,6 @@ export interface RealRunCliOptions {
   readonly resume?: string;
   readonly color?: boolean;
 }
-
-const rawProviderValue = (config: ResolvedConfig, providerId: string, key: string): unknown =>
-  config.providers[providerId]?.[key];
-
-const providerString = (
-  config: ResolvedConfig,
-  providerId: string,
-  key: string,
-): string | undefined => {
-  const value = rawProviderValue(config, providerId, key);
-  return typeof value === 'string' ? value : undefined;
-};
-
-const providerBoolean = (
-  config: ResolvedConfig,
-  providerId: string,
-  key: string,
-): boolean | undefined => {
-  const value = rawProviderValue(config, providerId, key);
-  return typeof value === 'boolean' ? value : undefined;
-};
-
-const providerArgs = (
-  config: ResolvedConfig,
-  providerId: string,
-  key: string,
-): readonly string[] | undefined => {
-  const value = rawProviderValue(config, providerId, key);
-  return Array.isArray(value) && value.every((item) => typeof item === 'string')
-    ? value
-    : undefined;
-};
-
-export const createRuntimeSupervisor = (
-  config: ResolvedConfig,
-  cacheDirectory: string,
-): CodexSupervisorProvider => {
-  if (config.supervisor.provider !== 'codex-cli') {
-    throw new ConfigurationError(
-      `Unsupported runtime supervisor provider: ${config.supervisor.provider}.`,
-    );
-  }
-  const effort = config.supervisor.reasoningEffort;
-  const reasoningEffort = ['minimal', 'low', 'medium', 'high', 'xhigh'].find(
-    (candidate) => candidate === effort,
-  ) as 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | undefined;
-  if (effort !== undefined && reasoningEffort === undefined) {
-    throw new ConfigurationError(`Unsupported Codex reasoning effort: ${effort}.`);
-  }
-  return new CodexSupervisorProvider({
-    binary: providerString(config, 'codex-cli', 'binary') ?? 'codex',
-    ...(config.supervisor.model === undefined ? {} : {model: config.supervisor.model}),
-    ...(config.supervisor.sessionMode === undefined
-      ? {}
-      : {profile: config.supervisor.sessionMode}),
-    ...(reasoningEffort === undefined ? {} : {reasoningEffort}),
-    cachePath: path.join(cacheDirectory, 'codex-probe.json'),
-    ignoreUserConfig: providerBoolean(config, 'codex-cli', 'ignoreUserConfig') ?? true,
-  });
-};
-
-export const createRuntimeWorker = (
-  config: ResolvedConfig,
-  cacheDirectory: string,
-): GeminiCliWorkerProvider | AntigravityCliWorkerProvider => {
-  const providerId = config.worker.provider;
-  const binary = providerString(config, providerId, 'binary');
-  const sandbox = providerBoolean(config, providerId, 'sandbox');
-  const extraArgs = providerArgs(config, providerId, 'extraArgs');
-  const argsTemplate = providerArgs(config, providerId, 'argsTemplate');
-  const common = {
-    ...(binary === undefined ? {} : {binary}),
-    ...(config.worker.model === undefined ? {} : {model: config.worker.model}),
-    cachePath: path.join(cacheDirectory, `${providerId}-probe.json`),
-    ...(sandbox === undefined ? {} : {sandbox}),
-    ...(extraArgs === undefined ? {} : {extraArgs}),
-    ...(argsTemplate === undefined ? {} : {argsTemplate}),
-  };
-  if (providerId === 'gemini-cli') return new GeminiCliWorkerProvider(common);
-  if (providerId === 'antigravity-cli') return new AntigravityCliWorkerProvider(common);
-  throw new ConfigurationError(`Unsupported runtime worker provider: ${providerId}.`);
-};
 
 const configuredGates = (values: readonly QualityGateConfig[]): readonly QualityGateDefinition[] =>
   values.flatMap((gate) => {
@@ -279,15 +190,19 @@ export const runRealCliWorkflow = async (
         : human,
     );
   };
-  const config = await loadResolvedConfig({
+  const cli = {
+    ...(options.profile === undefined ? {} : {profileName: options.profile}),
+    ...(options.supervisor === undefined ? {} : {supervisorProvider: options.supervisor}),
+    ...(options.supervisorModel === undefined ? {} : {supervisorModel: options.supervisorModel}),
+    ...(options.worker === undefined ? {} : {workerProvider: options.worker}),
+    ...(options.workerModel === undefined ? {} : {workerModel: options.workerModel}),
+  };
+  const config = await ensureConfiguredProfile({
     projectRoot,
-    cli: {
-      ...(options.profile === undefined ? {} : {profileName: options.profile}),
-      ...(options.supervisor === undefined ? {} : {supervisorProvider: options.supervisor}),
-      ...(options.supervisorModel === undefined ? {} : {supervisorModel: options.supervisorModel}),
-      ...(options.worker === undefined ? {} : {workerProvider: options.worker}),
-      ...(options.workerModel === undefined ? {} : {workerModel: options.workerModel}),
-    },
+    cli,
+    interactive: process.stdin.isTTY && process.stdout.isTTY,
+    output: options.output ?? 'human',
+    noColor: options.color === false || process.env.NO_COLOR !== undefined,
   });
   const paths = getAgentForemanPlatformPaths();
   const terminal = createInterface({

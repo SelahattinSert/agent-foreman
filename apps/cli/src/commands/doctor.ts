@@ -6,7 +6,7 @@ import {SqliteWorkflowStore} from '@agent-foreman/persistence';
 import {getAgentForemanPlatformPaths, inspectShim, runProcess} from '@agent-foreman/process';
 import {discoverGitRepository} from '@agent-foreman/workspace';
 
-import {createRuntimeSupervisor, createRuntimeWorker} from './real-run.js';
+import {createRuntimeSupervisor, createRuntimeWorker} from './runtime-providers.js';
 
 type DoctorStatus = 'PASS' | 'WARN' | 'FAIL' | 'SKIP';
 

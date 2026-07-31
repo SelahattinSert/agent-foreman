@@ -144,7 +144,10 @@ export const initProjectCommand = async (
   write(`Initialized ${configPath}.\n`);
 };
 
-export const settingsCommand = async (write: (message: string) => void): Promise<void> => {
-  const config = await loadResolvedConfig({projectRoot: process.cwd()});
+export const settingsCommand = async (
+  write: (message: string) => void,
+  projectRoot = process.cwd(),
+): Promise<void> => {
+  const config = await loadResolvedConfig({projectRoot});
   write(`${JSON.stringify(redactValue(config), null, 2)}\n`);
 };

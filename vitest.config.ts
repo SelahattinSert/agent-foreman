@@ -30,7 +30,7 @@ export default defineConfig({
     },
     environment: 'node',
     include: [
-      'apps/*/tests/**/*.test.ts',
+      'apps/*/tests/**/*.test.{ts,tsx}',
       'packages/*/tests/**/*.test.ts',
       'packages/providers/*/tests/**/*.test.ts',
     ],

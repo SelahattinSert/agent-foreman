@@ -3,11 +3,38 @@ node_modules/
 .pnpm-state/
 .pnpm-cache/
 .pnpm-home/
+
+# Build, test, and tool output
 dist/
 coverage/
 *.tsbuildinfo
 *.log
+.eslintcache
+.cache/
+.tmp/
+tmp/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Editors and operating systems
 .DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local workspaces and Agent Foreman runtime data
+.worktrees/
+worktrees/
 .agent-foreman/data/
+.agent-foreman/state/
+.agent-foreman/cache/
+.agent-foreman/logs/
 .agent-foreman/worktrees/
 debug-captures/
+docs/superpowers/

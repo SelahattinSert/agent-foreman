@@ -29,9 +29,7 @@ Agent Foreman requires Node.js 22.13 or newer. From a package release:
 
 ```sh
 pnpm add -g agent-foreman
-af profile create balanced \
-  --supervisor codex-cli --supervisor-model your-supervisor-model \
-  --worker gemini-cli --worker-model your-worker-model
+af settings
 af doctor
 af install-shim codex
 ```
@@ -57,7 +55,15 @@ cd my-project
 codex agent-foreman
 ```
 
-You can also use `af` or `af run`. Use `--plain` in a basic terminal or CI, `--output json` for JSONL events, `--no-color`/`NO_COLOR=1` without color, and `INK_SCREEN_READER=true` for Ink's screen-reader mode.
+You can also use `af` or `af run`. If the selected profile has no explicit supervisor or worker model, an interactive first run opens the global profile wizard before any session, provider call or workspace is created. The wizard lets you select the real providers, discover worker models where supported, enter exact model IDs, run health checks and explicitly save the profile.
+
+```sh
+af settings
+af profile list
+codex agent-foreman
+```
+
+In a non-interactive terminal, `af settings` remains read-only and prints the effective redacted configuration. Use `--plain` in a basic terminal or CI, `--output json` for JSONL events, `--no-color`/`NO_COLOR=1` without color, and `INK_SCREEN_READER=true` for Ink's screen-reader mode.
 
 ## Normal Codex usage
 
@@ -98,6 +104,8 @@ The working runtime providers are:
 - `antigravity-cli` worker through probed print/JSON/schema/edit mode.
 
 The adapter probes installed help/version output and caches capabilities. It rejects missing structured-output flags and invalid configured models instead of inventing flags or silently choosing another model. Safe array-based `args_template` supports compatible distributions without invoking a shell. Fake providers are available only to the test suite.
+
+`af settings` writes only the platform-standard global profile file. A failed provider check blocks saving. When a provider cannot enumerate models—currently the supported Codex Exec transport—the wizard shows a warning that requires a separate confirmation and preserves the exact model text; it never substitutes another model. Existing CLI profile commands and direct TOML configuration remain supported.
 
 See [configuration](docs/configuration.md) and [provider development](docs/provider-development.md).
 The repository also includes a copyable [balanced TOML example](examples/configs/balanced.toml).

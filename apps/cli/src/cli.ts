@@ -8,12 +8,12 @@ import {
   editProfileCommand,
   initProjectCommand,
   listProfilesCommand,
-  settingsCommand,
   useProfileCommand,
   type ProfileMutationOptions,
 } from './commands/configuration.js';
 import {doctorCommand} from './commands/doctor.js';
 import {runRealCliWorkflow, type RealRunCliOptions} from './commands/real-run.js';
+import {runSettingsCommand} from './commands/settings.js';
 import {
   installShimCommand,
   printShellSetupCommand,
@@ -35,6 +35,7 @@ import {
 export interface CliDependencies {
   readonly frontendProvider: string;
   readonly runReal: (frontendProvider: string, options: RealRunCliOptions) => Promise<void>;
+  readonly runSettings: () => Promise<void>;
   readonly resumeTask: (sessionId: string, write: (message: string) => void) => Promise<void>;
   readonly write: (message: string) => void;
 }
@@ -50,6 +51,16 @@ const mergedProfileOptions = (
 const defaultDependencies = (frontendProvider: string): CliDependencies => ({
   frontendProvider,
   runReal: runRealCliWorkflow,
+  runSettings: async () => {
+    await runSettingsCommand(
+      {
+        interactive: process.stdin.isTTY && process.stdout.isTTY,
+        projectRoot: process.cwd(),
+        noColor: process.env.NO_COLOR !== undefined,
+      },
+      (message) => process.stdout.write(message),
+    );
+  },
   resumeTask: taskResumeCommand,
   write: (message) => process.stdout.write(message),
 });
@@ -108,9 +119,9 @@ export const createCliProgram = (dependencies: CliDependencies): Command => {
 
   program
     .command('settings')
-    .description('Show the effective redacted configuration')
+    .description('Configure a global profile or show redacted settings in non-interactive mode')
     .action(async () => {
-      await settingsCommand(dependencies.write);
+      await dependencies.runSettings();
     });
 
   const init = addProfileOptions(
