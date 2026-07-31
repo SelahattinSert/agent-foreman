@@ -1,0 +1,13 @@
+node_modules/
+.pnpm-store/
+.pnpm-state/
+.pnpm-cache/
+.pnpm-home/
+dist/
+coverage/
+*.tsbuildinfo
+*.log
+.DS_Store
+.agent-foreman/data/
+.agent-foreman/worktrees/
+debug-captures/

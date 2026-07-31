@@ -1,0 +1,43 @@
+{
+  "compilerOptions": {
+    "allowImportingTsExtensions": false,
+    "declaration": true,
+    "declarationMap": true,
+    "esModuleInterop": true,
+    "exactOptionalPropertyTypes": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "ignoreDeprecations": "6.0",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleDetection": "force",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2023",
+    "paths": {
+      "@agent-foreman/config": ["./packages/config/src/index.ts"],
+      "@agent-foreman/contracts": ["./packages/contracts/src/index.ts"],
+      "@agent-foreman/core": ["./packages/core/src/index.ts"],
+      "@agent-foreman/observability": ["./packages/observability/src/index.ts"],
+      "@agent-foreman/persistence": ["./packages/persistence/src/index.ts"],
+      "@agent-foreman/process": ["./packages/process/src/index.ts"],
+      "@agent-foreman/prompts": ["./packages/prompts/src/index.ts"],
+      "@agent-foreman/provider-sdk": ["./packages/provider-sdk/src/index.ts"],
+      "@agent-foreman/provider-codex-cli": ["./packages/providers/codex-cli/src/index.ts"],
+      "@agent-foreman/provider-gemini-cli": ["./packages/providers/gemini-cli/src/index.ts"],
+      "@agent-foreman/quality-gates": ["./packages/quality-gates/src/index.ts"],
+      "@agent-foreman/workspace": ["./packages/workspace/src/index.ts"]
+    },
+    "types": ["node", "vitest/globals"]
+  }
+}

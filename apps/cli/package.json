@@ -1,0 +1,52 @@
+{
+  "name": "agent-foreman",
+  "version": "0.1.0",
+  "description": "Supervisor-worker orchestration for coding CLIs",
+  "keywords": [
+    "ai-agents",
+    "coding-agents",
+    "multi-agent",
+    "codex",
+    "gemini-cli",
+    "developer-tools",
+    "terminal",
+    "typescript",
+    "orchestration",
+    "code-review"
+  ],
+  "homepage": "https://github.com/agent-foreman/agent-foreman#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agent-foreman/agent-foreman.git"
+  },
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "af": "./dist/main.js",
+    "af-dispatch": "./dist/dispatcher-main.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/main.d.ts",
+      "import": "./dist/main.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup --config tsup.config.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "13.0.2",
+    "commander": "^15.0.0",
+    "ink": "^7.1.1",
+    "react": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

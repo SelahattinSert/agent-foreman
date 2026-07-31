@@ -1,0 +1,20 @@
+{
+  "name": "@agent-foreman/provider-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean"
+  },
+  "dependencies": {
+    "@agent-foreman/contracts": "workspace:*",
+    "@agent-foreman/core": "workspace:*",
+    "zod": "catalog:"
+  }
+}

@@ -1,0 +1,52 @@
+version = 1
+active_profile = "balanced"
+
+[workspace]
+mode = "smart"
+preserve_on_failure = true
+preserve_on_pause = true
+
+[planning]
+require_explicit_approval = true
+allow_repository_read = true
+allow_baseline_checks = true
+network_access = false
+
+[workflow]
+max_worker_iterations = 8
+max_mechanical_repairs = 3
+max_supervisor_reviews = 5
+max_same_finding_occurrences = 2
+pause_on_no_progress_iterations = 2
+detect_diff_oscillation = true
+
+[profiles.balanced.supervisor]
+provider = "codex-cli"
+model = "your-supervisor-model"
+reasoning_effort = "high"
+
+[profiles.balanced.worker]
+provider = "antigravity-cli"
+model = "your-worker-model"
+
+[providers.codex-cli]
+binary = "codex"
+ignore_user_config = true
+
+[providers.antigravity-cli]
+binary = "agy"
+sandbox = true
+
+[quality]
+require_supervisor_approval = true
+maximum_open_critical = 0
+maximum_open_high = 0
+allow_open_medium = true
+allow_open_low = true
+
+[[quality.gates]]
+id = "tests"
+type = "command"
+command = ["pnpm", "test"]
+required = true
+timeout_seconds = 600
