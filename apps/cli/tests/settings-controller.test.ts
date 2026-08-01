@@ -29,12 +29,14 @@ const dependencies = (
   document: ConfigDocument = emptyDocument,
 ): SettingsControllerDependencies & {
   readonly save: ReturnType<typeof vi.fn>;
+  readonly discoverSupervisorModels: ReturnType<typeof vi.fn>;
   readonly discoverWorkerModels: ReturnType<typeof vi.fn>;
 } => {
   const save = vi.fn(async (_draft: SettingsDraft) => undefined);
   return {
     service: {load: vi.fn(async () => document), save},
     validate: vi.fn(async () => validation(status)),
+    discoverSupervisorModels: vi.fn(async () => []),
     discoverWorkerModels: vi.fn(async () => []),
     save,
   };
@@ -66,6 +68,32 @@ const reachValidation = async (controller: SettingsController): Promise<void> =>
 };
 
 describe('SettingsController', () => {
+  test('uses a compact worker-only wizard when native Codex is the supervisor', async () => {
+    const deps = dependencies();
+    const controller = new SettingsController({...deps, nativeSupervisor: true});
+
+    await controller.initialize();
+    await choose(controller, 'create-profile');
+    await enter(controller, 'daily');
+    expect(controller.getSnapshot()).toMatchObject({
+      nativeSupervisor: true,
+      step: 'worker-provider',
+      draft: {supervisorProvider: 'codex-cli'},
+    });
+    await choose(controller, 'gemini-cli');
+    await enter(controller, 'worker-model');
+    await choose(controller, 'continue');
+    await choose(controller, 'save');
+
+    expect(deps.save).toHaveBeenCalledWith({
+      profileName: 'daily',
+      nativeSupervisor: true,
+      supervisorProvider: 'codex-cli',
+      workerProvider: 'gemini-cli',
+      workerModel: 'worker-model',
+    });
+  });
+
   test('selects create-profile when the requested first-run profile does not exist globally', async () => {
     const deps = dependencies('PASS', {
       version: 1,
@@ -164,6 +192,43 @@ describe('SettingsController', () => {
       'manual-model',
     ]);
     expect(controller.getSnapshot().selectedIndex).toBe(1);
+  });
+
+  test('offers picker-visible Codex models and preserves the configured selection', async () => {
+    const deps = dependencies('PASS', {
+      version: 1,
+      activeProfile: 'existing',
+      profiles: {
+        existing: {
+          supervisor: {provider: 'codex-cli', model: 'gpt-current'},
+          worker: {provider: 'gemini-cli', model: 'worker-model'},
+        },
+      },
+    });
+    deps.discoverSupervisorModels.mockResolvedValue([
+      {id: 'gpt-default', displayName: 'GPT Default', available: true},
+      {id: 'gpt-current', displayName: 'GPT Current', available: true},
+    ]);
+    const controller = new SettingsController(deps);
+
+    await controller.initialize();
+    await choose(controller, 'profile:existing');
+    await choose(controller, 'codex-cli');
+
+    expect(controller.getSnapshot()).toMatchObject({
+      step: 'supervisor-model-choice',
+      selectedIndex: 1,
+    });
+    expect(controller.getSnapshot().choices.map(({id}) => id)).toEqual([
+      'model:gpt-default',
+      'model:gpt-current',
+      'manual-model',
+    ]);
+    await choose(controller, 'model:gpt-current');
+    expect(controller.getSnapshot()).toMatchObject({
+      step: 'reasoning-effort',
+      draft: {supervisorModel: 'gpt-current'},
+    });
   });
 
   test('Escape cancels without writing', async () => {

@@ -20,6 +20,7 @@ export default defineConfig({
         './packages/providers/gemini-cli/src/index.ts',
       ),
       '@agent-foreman/quality-gates': fromRoot('./packages/quality-gates/src/index.ts'),
+      '@agent-foreman/runtime': fromRoot('./packages/runtime/src/index.ts'),
       '@agent-foreman/workspace': fromRoot('./packages/workspace/src/index.ts'),
     },
   },

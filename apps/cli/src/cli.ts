@@ -12,8 +12,10 @@ import {
   type ProfileMutationOptions,
 } from './commands/configuration.js';
 import {doctorCommand} from './commands/doctor.js';
+import {runMcpServerCommand} from './commands/mcp.js';
 import {runRealCliWorkflow, type RealRunCliOptions} from './commands/real-run.js';
 import {runSettingsCommand} from './commands/settings.js';
+import {setupCodexCommand} from './commands/setup-codex.js';
 import {
   installShimCommand,
   printShellSetupCommand,
@@ -35,6 +37,7 @@ import {
 export interface CliDependencies {
   readonly frontendProvider: string;
   readonly runReal: (frontendProvider: string, options: RealRunCliOptions) => Promise<void>;
+  readonly runMcp: () => Promise<void>;
   readonly runSettings: () => Promise<void>;
   readonly resumeTask: (sessionId: string, write: (message: string) => void) => Promise<void>;
   readonly write: (message: string) => void;
@@ -51,6 +54,7 @@ const mergedProfileOptions = (
 const defaultDependencies = (frontendProvider: string): CliDependencies => ({
   frontendProvider,
   runReal: runRealCliWorkflow,
+  runMcp: runMcpServerCommand,
   runSettings: async () => {
     await runSettingsCommand(
       {
@@ -123,6 +127,31 @@ export const createCliProgram = (dependencies: CliDependencies): Command => {
     .action(async () => {
       await dependencies.runSettings();
     });
+
+  program
+    .command('mcp')
+    .description('Run the local headless MCP control plane')
+    .command('serve')
+    .description('Serve Agent Foreman tools over stdio for an explicitly invoked skill')
+    .action(async () => {
+      await dependencies.runMcp();
+    });
+
+  program
+    .command('setup')
+    .description('Install an explicit skill and local MCP integration')
+    .argument('[frontend]', 'Coding CLI to integrate with', 'codex')
+    .option('--yes', 'Approve the displayed managed configuration changes', false)
+    .option('--replace', 'Replace a different MCP entry after explicit review', false)
+    .option('--remove', 'Remove only the managed skill and matching MCP entry', false)
+    .action(
+      async (frontend: string, options: {yes: boolean; replace: boolean; remove: boolean}) => {
+        if (frontend !== 'codex') {
+          throw new ConfigurationError(`Skill integration is not supported for ${frontend}.`);
+        }
+        await setupCodexCommand(options, {write: dependencies.write});
+      },
+    );
 
   const init = addProfileOptions(
     program.command('init').description('Create or update project Agent Foreman configuration'),

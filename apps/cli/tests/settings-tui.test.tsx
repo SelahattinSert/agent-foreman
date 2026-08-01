@@ -9,6 +9,7 @@ import {
 import type {SettingsSnapshot} from '../src/settings/settings-controller.js';
 
 const snapshot: SettingsSnapshot = {
+  nativeSupervisor: false,
   step: 'review',
   title: 'Review the global profile',
   choices: [
@@ -109,8 +110,40 @@ describe('SettingsView', () => {
     expect(frame).toContain('Worker: gemini-cli / worker-model');
     expect(frame).toContain('Worker binary: gemini');
     expect(frame).toContain('WARN supervisor: Exact model cannot be enumerated.');
-    expect(frame).toContain('> Save global profile');
+    expect(frame).toContain('Choose an option');
+    expect(frame).toContain('❯ Save global profile');
+    expect(frame).toContain('Selected 2 of 2');
+    expect(frame).not.toContain('❯ Back to providers');
+    expect(frame).toContain('↑/↓ move · Enter select');
     expect(frame).toContain('Esc cancel');
+  });
+
+  test('presents the compact worker-only flow for native Codex supervision', () => {
+    const nativeSnapshot: SettingsSnapshot = {
+      ...snapshot,
+      nativeSupervisor: true,
+      step: 'worker-provider',
+      title: 'Select the worker provider',
+      draft: {profileName: 'daily', supervisorProvider: 'codex-cli'},
+    };
+    const frame = renderToString(
+      <SettingsView controller={controller({getSnapshot: () => nativeSnapshot})} noColor={true} />,
+    );
+
+    expect(frame).toContain('Step 2/5');
+    expect(frame).toContain('Supervisor: current native Codex session');
+    expect(frame).not.toContain('Supervisor binary:');
+  });
+
+  test('moves the visible selection marker with the selected index', () => {
+    const firstChoice = {...snapshot, selectedIndex: 0};
+    const frame = renderToString(
+      <SettingsView controller={controller({getSnapshot: () => firstChoice})} noColor={true} />,
+    );
+
+    expect(frame).toContain('❯ Back to providers');
+    expect(frame).not.toContain('❯ Save global profile');
+    expect(frame).toContain('Selected 1 of 2');
   });
 
   test('maps arrows, Enter, typing, Backspace, and Escape to controller actions', () => {

@@ -63,4 +63,19 @@ describe('discoverBinary', () => {
       }),
     ).rejects.toBeInstanceOf(BinaryNotFoundError);
   });
+
+  test('discovers a Windows CMD provider through PATHEXT', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'agent-foreman-discovery-win32-'));
+    const binary = path.join(root, 'provider.cmd');
+    await writeFile(binary, '@echo off\r\nexit /b 0\r\n');
+
+    await expect(
+      discoverBinary({
+        binaryName: 'provider',
+        pathValue: root,
+        platform: 'win32',
+        pathExtensions: ['.CMD'],
+      }),
+    ).resolves.toBe(binary);
+  });
 });

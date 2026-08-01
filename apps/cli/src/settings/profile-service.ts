@@ -8,8 +8,9 @@ import {ConfigurationError} from '@agent-foreman/core';
 
 export interface SettingsDraft {
   readonly profileName: string;
+  readonly nativeSupervisor?: boolean;
   readonly supervisorProvider: string;
-  readonly supervisorModel: string;
+  readonly supervisorModel?: string;
   readonly reasoningEffort?: string;
   readonly workerProvider: string;
   readonly workerModel: string;
@@ -58,7 +59,9 @@ export class GlobalProfileService {
         [profileName]: {
           supervisor: {
             provider: requiredText(draft.supervisorProvider, 'Supervisor provider'),
-            model: requiredText(draft.supervisorModel, 'Supervisor model'),
+            ...(draft.supervisorModel === undefined
+              ? {}
+              : {model: requiredText(draft.supervisorModel, 'Supervisor model')}),
             ...(reasoningEffort === undefined || reasoningEffort === '' ? {} : {reasoningEffort}),
           },
           worker: {

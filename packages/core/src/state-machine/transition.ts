@@ -98,6 +98,8 @@ const nextStateFor = (current: WorkflowState, event: WorkflowEvent): WorkflowSta
         event,
         'REVISING_IMPLEMENTATION',
       );
+    case 'WORKER_RETRY_STARTED':
+      return requireState(current, ['PAUSED'], event, 'EXECUTING_WORKER');
     case 'WORKER_REVISION_STARTED':
       return requireState(current, ['REVISING_IMPLEMENTATION'], event, 'EXECUTING_WORKER');
     case 'USER_DECISION_REQUIRED':
@@ -145,6 +147,7 @@ export const transitionWorkflow = (
   if (event.type === 'PLAN_APPROVED') next.approvedPlanVersion = event.planVersion;
   if (
     event.type === 'WORKSPACE_READY' ||
+    event.type === 'WORKER_RETRY_STARTED' ||
     event.type === 'WORKER_REVISION_STARTED' ||
     event.type === 'MECHANICAL_REPAIR_FINISHED'
   ) {
@@ -153,10 +156,15 @@ export const transitionWorkflow = (
   if (event.type === 'WORKSPACE_READY' && event.workspace !== undefined) {
     next.workspace = event.workspace;
   }
+  if (event.type === 'CHANGES_APPLIED' && event.workspace !== undefined) {
+    next.workspace = event.workspace;
+  }
   if (event.type === 'TASK_PAUSED' || event.type === 'FATAL_ERROR') {
     next.statusMessage = event.reason;
   }
-  if (event.type === 'TASK_RESUMED') delete next.statusMessage;
+  if (event.type === 'TASK_RESUMED' || event.type === 'WORKER_RETRY_STARTED') {
+    delete next.statusMessage;
+  }
 
   return TaskSessionSchema.parse(next);
 };

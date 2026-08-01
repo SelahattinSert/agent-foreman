@@ -20,6 +20,20 @@ Run the same binary's `--version`/`--help`, then `af provider doctor`. Configure
 
 Probe results are cached under the Agent Foreman data directory for one day. Remove only the provider probe JSON from its `cache` directory when intentionally testing an upgraded CLI; the next health check recreates it.
 
+## Antigravity 1.1.9 sandbox fails on Fedora Java `cacerts`
+
+Some Fedora/RHEL Java layouts expose `/usr/lib/jvm/.../lib/security/cacerts` read-only inside Antigravity's terminal sandbox. `agy --sandbox` may then log `keytool ... Read-only file system`, reset its sandbox socket and request an `unsandboxed` retry. Agent Foreman does not grant that retry.
+
+The default Antigravity provider mode avoids the broken terminal path without granting host shell access: `sandbox` is omitted or set to `false`, every worker terminal/URL/MCP action is denied, file tools remain confined to the isolated worktree, and Agent Foreman runs quality gates itself. Use:
+
+```toml
+[providers.antigravity-cli]
+binary = "agy"
+sandbox = false
+```
+
+Restart the Codex process after changing provider configuration or rebuilding a development checkout. If you explicitly set `sandbox = true`, sandbox startup failures remain fatal and the worktree is preserved. Do not use `--dangerously-skip-permissions`, do not allow `unsandboxed(*)`, and do not point `SSL_CERT_FILE` at a Java JKS/PKCS12 `cacerts` file.
+
 ## `codex` recurses or does not intercept
 
 ```sh
@@ -37,7 +51,7 @@ Check `af shim status codex` and compare the recorded real path with the provide
 
 ## Dirty repository or missing files
 
-`/head` intentionally excludes all local changes. `/include` carries tracked diffs only and blocks sensitive paths; untracked/ignored files are listed but not copied. Commit/stage a non-secret fixture or copy it manually only after understanding the risk. Non-Git snapshot mode excludes `.git`, `node_modules`, `.agent-foreman`, secrets, symlinks and files over 5 MiB.
+In native Codex, `$agent-foreman head-worktree` intentionally excludes all local changes. `$agent-foreman include-tracked` carries tracked diffs only and blocks sensitive paths; untracked/ignored files are listed but not copied. The standalone CLI presents equivalent `/head` and `/include` prompts. Commit/stage a non-secret fixture or copy it manually only after understanding the risk. Non-Git snapshot mode excludes `.git`, `node_modules`, `.agent-foreman`, secrets, symlinks and files over 5 MiB.
 
 ## Quality command is missing dependencies
 
@@ -56,7 +70,7 @@ af task logs <id>
 af task resume <id>
 ```
 
-If a provider process was interrupted before a completion record, resume starts the safe phase again with the frozen plan/diff evidence. Completed provider records and session IDs are reused when supported. The worktree/snapshot remains on pause and cancel unless you explicitly choose discard at the apply boundary.
+If the initial provider call failed before producing any workspace changes, `$agent-foreman resume <id>` can explicitly retry it with the same frozen plan and preserved workspace. Partial or ambiguous workspaces remain paused for inspection instead of being replayed. Completed provider records and session IDs are reused when supported. The worktree/snapshot remains on pause and cancel unless you explicitly choose discard at the apply boundary.
 
 ## JSON output
 

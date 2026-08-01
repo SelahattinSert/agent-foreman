@@ -451,7 +451,7 @@ export const resumeExecutionWorkflow = async (
       if (current.state === 'APPLYING_CHANGES') {
         const applied = await options.applyChanges(workspace);
         await options.store.recordWorkspace(current.id, applied.workspace);
-        await commit({type: 'CHANGES_APPLIED'});
+        await commit({type: 'CHANGES_APPLIED', workspace: applied.workspace});
         return current;
       }
       if (current.state === 'COMPLETED' || current.state === 'CANCELLED') return current;

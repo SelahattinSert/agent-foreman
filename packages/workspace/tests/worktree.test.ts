@@ -33,6 +33,8 @@ const createRepository = async (): Promise<{root: string; dataDirectory: string}
   await git(root, ['init']);
   await git(root, ['config', 'user.email', 'fixture@example.test']);
   await git(root, ['config', 'user.name', 'Fixture']);
+  await git(root, ['config', 'core.autocrlf', 'false']);
+  await git(root, ['config', 'core.eol', 'lf']);
   await writeFile(path.join(root, 'source.txt'), 'baseline\n');
   await git(root, ['add', 'source.txt']);
   await git(root, ['commit', '-m', 'baseline']);

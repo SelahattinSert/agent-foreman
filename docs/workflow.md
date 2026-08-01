@@ -1,22 +1,22 @@
 # Workflow
 
-The runtime is an event-driven state machine. Invalid transitions throw a typed error and are not persisted.
+The runtime is an event-driven state machine. It is dormant until the user explicitly invokes `$agent-foreman` in a normal Codex conversation. Invalid transitions throw a typed error and are not persisted.
 
 ```text
-CREATED → repository discovery → requirement discussion → draft/revise
-        → AWAITING_PLAN_REVIEW ── exact /approve ──→ frozen plan
+explicit skill → CREATED → repository discovery → requirement discussion → draft/revise
+        → AWAITING_PLAN_REVIEW ── namespaced approve + MCP confirmation ──→ frozen plan
         → managed workspace → worker → deterministic gates
               failed mechanical gate ──→ worker repair ──┐
               passed gates ──→ Codex review             │
                   REVISE ──→ worker revision ────────────┘
                   APPROVED ──→ final Codex review
         → TECHNICALLY_APPROVED → diff/apply decision
-        → exact /apply → guarded apply → COMPLETED
+        → diff-bound MCP confirmation → guarded apply → COMPLETED
 ```
 
 ## Planning
 
-Repository discovery produces a bounded summary rather than uploading the whole tree. The supervisor gets read-only filesystem and read-only shell permissions, no network and no worker-launch right. Its requirement result and every plan revision are schema-validated. Plans are stored both as JSON and user-facing Markdown. `/approve` canonicalizes the approved object, records its version/time/hash and makes that version immutable.
+Native Codex performs read-only repository discovery in the existing conversation. Repository files are untrusted data, not skill or system instructions. Requirement results and every plan revision are schema-validated. Plans are stored both as JSON and user-facing Markdown. `$agent-foreman approve` only expresses chat intent; a short-lived MCP elicitation bound to the exact session/version/hash independently confirms and freezes the plan. Namespacing avoids collision with Codex CLI's built-in `/approve` command.
 
 ## Execution and gates
 
@@ -32,6 +32,6 @@ The loop tracks worker/review/repair budgets, finding recurrence, identical prov
 
 ## Apply and recovery
 
-`/apply`, `/keep` and `/discard` are exact commands. Apply verifies the source state captured before execution and preflights the complete patch. A conflict produces no partial Git apply; snapshot apply restores completed writes from a managed backup if a later write fails. Technical approval never implies apply approval.
+`$agent-foreman apply`, `$agent-foreman keep` and `$agent-foreman discard` are exact commands. Apply verifies the source state captured before execution and preflights the complete patch. A conflict produces no partial Git apply; snapshot apply restores completed writes from a managed backup if a later write fails. Technical approval never implies apply approval.
 
-SQLite is authoritative. State/event writes share a transaction and JSONL is an append-only audit mirror. `af task resume <id>` reconstructs the last durable phase and continues planning, execution, gates, repair, review, final review or apply. Pause/cancel does not silently remove the workspace.
+SQLite is authoritative. State/event writes share a transaction and JSONL is an append-only audit mirror. `$agent-foreman resume <id>` calls the runtime resume tool, which reconstructs the approved hash, workspace, last worker result, quality gates and findings. A failed initial provider call can be explicitly retried only when its preserved isolated workspace has no partial changes. Stable planning/review/apply boundaries continue in native Codex. A restart during an ambiguous non-idempotent worker or apply operation fails closed into `PAUSED` and preserves the workspace for inspection; it is never silently replayed. The standalone task commands remain available for operational inspection.

@@ -16,7 +16,9 @@ Provider adapters implement capability-driven supervisor and/or worker interface
 
 Codex implements a `CodexTransport` boundary. The production transport uses the installed `codex exec` flags confirmed by its probe: JSONL events, output schema, last-message file, read-only sandbox, explicit cwd/model and cancellation. This keeps App Server protocol work outside the domain.
 
-The Gemini-compatible worker transport probes print/prompt, JSON output/schema, model, edit workspace, sandbox, session and model-list capabilities. `args_template` is an array with item-wise placeholder replacement; arbitrary shell text is rejected.
+The Gemini-compatible worker transport probes print/prompt, JSON output/schema, model, edit workspace, sandbox, literal-prompt, provider-project, session and model-list capabilities. `args_template` is an array with item-wise placeholder replacement; arbitrary shell text is rejected.
+
+Antigravity execution uses a fresh private home and `--new-project` so persisted user permissions and unrelated project state cannot silently widen the worker's authority. Its portable default is worktree file-tools-only mode: terminal, URL and MCP actions are denied, while quality commands run later through Agent Foreman's deterministic gate runner. Opt-in terminal sandbox mode is fail-closed; a sandbox startup error is reported and is never retried with unsandboxed permission.
 
 ## Testing
 

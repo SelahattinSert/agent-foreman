@@ -1,4 +1,6 @@
-import {spawn, type ChildProcess} from 'node:child_process';
+import type {ChildProcess} from 'node:child_process';
+
+import crossSpawn from 'cross-spawn';
 
 import {BinaryNotFoundError, ProcessExecutionError} from '@agent-foreman/core';
 
@@ -74,7 +76,7 @@ export const runProcess = async (input: ProcessRunInput): Promise<ProcessRunResu
   }
 
   return await new Promise<ProcessRunResult>((resolve, reject) => {
-    const child = spawn(input.executable, [...(input.args ?? [])], {
+    const child = crossSpawn(input.executable, [...(input.args ?? [])], {
       cwd: input.cwd,
       env: {...(input.inheritEnvironment === false ? {} : process.env), ...input.environment},
       shell: false,

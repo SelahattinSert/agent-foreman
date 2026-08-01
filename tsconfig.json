@@ -5,6 +5,7 @@
     "apps/**/*.tsx",
     "packages/**/*.ts",
     "packages/**/*.tsx",
+    "tsdown.config.ts",
     "vitest.config.ts",
     "vitest.workspace.ts"
   ]

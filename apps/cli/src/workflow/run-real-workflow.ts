@@ -721,6 +721,6 @@ export const runRealWorkflow = async (options: RunRealWorkflowOptions): Promise<
   const applied = await options.applyChanges(workspace);
   workspace = applied.workspace;
   await options.store.recordWorkspace(current.id, workspace);
-  await commit({type: 'CHANGES_APPLIED'});
+  await commit({type: 'CHANGES_APPLIED', workspace});
   return current;
 };

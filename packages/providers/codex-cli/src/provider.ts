@@ -1,12 +1,13 @@
 import {randomUUID} from 'node:crypto';
 
-import {z} from 'zod';
+import type {z} from 'zod';
 
 import {
   RequirementDiscoveryResultSchema,
   ReviewDecisionSchema,
   TaskPlanSchema,
   type FinalReviewDecision,
+  type ModelDescriptor,
   type ProviderDescriptor,
   type ProviderHealth,
   type RequirementDiscoveryResult,
@@ -30,7 +31,9 @@ import type {
 } from '@agent-foreman/provider-sdk';
 
 import {CodexExecTransport} from './exec-transport.js';
+import {discoverCodexModels} from './app-server-models.js';
 import {probeCodexCli, type CodexProbeResult} from './probe.js';
+import {createCodexOutputSchema, decodeCodexOutput} from './structured-output.js';
 import type {CodexTransport, CodexTransportResponse} from './transport.js';
 
 export interface CodexSupervisorProviderOptions {
@@ -42,6 +45,7 @@ export interface CodexSupervisorProviderOptions {
   readonly transport?: CodexTransport;
   readonly ignoreUserConfig?: boolean;
   readonly probe?: () => Promise<CodexProbeResult>;
+  readonly modelDiscovery?: () => Promise<ModelDescriptor[]>;
 }
 
 export class CodexSupervisorProvider implements SupervisorProvider {
@@ -79,7 +83,7 @@ export class CodexSupervisorProvider implements SupervisorProvider {
         shellTools: true,
         streaming: probe.execJson,
         tokenUsageReporting: probe.execJson,
-        modelDiscovery: false,
+        modelDiscovery: probe.appServer,
       },
     };
   }
@@ -142,6 +146,16 @@ export class CodexSupervisorProvider implements SupervisorProvider {
         message: error instanceof Error ? error.message : 'Codex CLI probe failed.',
       };
     }
+  }
+
+  public async discoverModels(): Promise<ModelDescriptor[]> {
+    const probe = await this.probe();
+    if (!probe.appServer) {
+      throw new ProviderCapabilityError(
+        'This Codex CLI does not expose the app-server required for model discovery.',
+      );
+    }
+    return await (this.options.modelDiscovery?.() ?? discoverCodexModels({binary: this.binary}));
   }
 
   public async analyzeRequirements(
@@ -309,7 +323,7 @@ export class CodexSupervisorProvider implements SupervisorProvider {
       response = await this.transport.request({
         executionId,
         prompt,
-        outputSchema: z.toJSONSchema(schema),
+        outputSchema: createCodexOutputSchema(schema),
         cwd: context.projectRoot,
         model,
         ...(this.options.profile === undefined ? {} : {profile: this.options.profile}),
@@ -328,7 +342,7 @@ export class CodexSupervisorProvider implements SupervisorProvider {
       });
       throw error;
     }
-    const parsed = schema.safeParse(response.value);
+    const parsed = schema.safeParse(decodeCodexOutput(response.value, schema));
     if (!parsed.success) {
       throw new ProviderOutputValidationError('Codex response did not match the required schema.', {
         cause: parsed.error,

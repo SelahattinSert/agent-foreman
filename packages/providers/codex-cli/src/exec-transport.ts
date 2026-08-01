@@ -161,6 +161,7 @@ export class CodexExecTransport implements CodexTransport {
             executionId: input.executionId,
             exitCode: result.exitCode,
             stderr: redactValue(result.stderr),
+            stdout: redactValue(result.stdout.slice(-8_192)),
           },
         });
       }

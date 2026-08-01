@@ -1,10 +1,10 @@
 # Agent Foreman Implementation Plan
 
-> Status snapshot: 2026-07-31. Every completed milestone is covered by automated tests; real provider account calls remain an opt-in user operation and are never required by CI.
+> Status snapshot: 2026-08-01. The primary product path is now an explicit Codex skill plus a local MCP stdio enforcement runtime. Real provider account calls remain opt-in and are never required by CI.
 
 ## Goal and boundaries
 
-Agent Foreman is a provider-neutral, approval-gated supervisor–worker orchestrator. Core policy never imports a concrete provider, process, workspace, database or UI implementation. Adapters validate untrusted data at every boundary. The original coding CLI remains untouched and the worker cannot run before an immutable plan approval.
+Agent Foreman is a provider-neutral, approval-gated supervisor–worker orchestrator. Native Codex owns the primary conversation only after `$agent-foreman` is explicitly invoked; the headless runtime owns durable state and mutation authorization. Core policy never imports a concrete provider, process, workspace, database or UI implementation. The original coding CLI remains untouched and the worker cannot run before an immutable plan approval.
 
 ## Package map
 
@@ -21,13 +21,14 @@ Agent Foreman is a provider-neutral, approval-gated supervisor–worker orchestr
 | `providers/*`   | probed Codex and Gemini-compatible CLI adapters                  |
 | `prompts`       | versioned, schema-bound prompt templates                         |
 | `observability` | secret redaction and normalized logging                          |
+| `runtime`       | MCP tools, trusted approvals, real execution/review coordination |
 | `apps/cli`      | Commander CLI, plain/JSON interaction, Ink TUI and orchestration |
 
 ## Milestone status
 
 ### 0 — Bootstrap: complete
 
-Strict ESM TypeScript monorepo, pnpm, tsup, ESLint, Prettier, Vitest, Apache-2.0, CI on Ubuntu/macOS/Windows with Node 22/24, documentation and ADRs.
+Strict ESM TypeScript monorepo, pnpm, tsdown, ESLint, Prettier, Vitest, Apache-2.0, CI on Ubuntu/macOS/Windows with supported Node LTS versions, documentation and ADRs.
 
 ### 1 — Core domain: complete
 
@@ -43,7 +44,7 @@ Safe subprocess arrays, capture/inherit modes, timeouts, abort/signals, binary/s
 
 ### 4 — Collaborative planning: complete
 
-Repository discovery, read-only supervisor analysis, structured draft/revision, Markdown and JSON storage, explicit `/approve`, superseded versions and worker-start hash guard. Fake providers remain deterministic test fixtures only.
+Repository discovery, read-only supervisor analysis, structured draft/revision, Markdown and JSON storage, explicit namespaced approval, superseded versions and worker-start hash guard. Fake providers remain deterministic test fixtures only.
 
 ### 5 — Workspace and worker: complete
 
@@ -61,6 +62,10 @@ Separate apply approval, source-drift detection, Git preflight, snapshot rollbac
 
 Plain/JSON modes, accessible Ink TUI, doctor, settings, profile/provider/task/shim commands, packaging and operational documentation.
 
+### 9 — Native Codex hybrid: implemented
+
+An explicit-only `$agent-foreman` skill keeps planning and semantic review in native Codex. `af setup codex` installs the managed skill and registers `af mcp serve` without a shim or `PATH` edit. MCP elicitation independently confirms plan/apply challenges. The runtime binds real worker execution, isolated workspaces, discovered quality gates, finding-preserving revisions, loop protection, guarded apply and resume packets to durable session/hash checks. Standalone CLI, Ink and shims remain secondary interfaces.
+
 ## Release verification
 
 Run from a clean dependency graph:
@@ -68,13 +73,14 @@ Run from a clean dependency graph:
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
+pnpm verify:package
 pnpm lint
 pnpm test
 pnpm typecheck
 pnpm format:check
 ```
 
-Provider tests use fixture executables and never touch a user's account. Release smoke testing additionally probes installed binaries with `af provider doctor`, validates exact worker models with `af provider models worker`, installs the Codex shim in a temporary managed directory, and confirms both normal passthrough and exact `agent-foreman` interception.
+Provider tests use fixture executables and never touch a user's account. `pnpm verify:package` installs the publishable tarball into a temporary global prefix and exercises the packaged CLI, SQLite and native dispatcher lifecycle on every CI platform. Release smoke testing additionally probes installed binaries with `af provider doctor`, validates the exact worker model, installs the skill/MCP integration in a temporary Codex home, confirms implicit invocation is disabled, and exercises the explicit protocol through apply.
 
 ## Non-negotiable invariants
 

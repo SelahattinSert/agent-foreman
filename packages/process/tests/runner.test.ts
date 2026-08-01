@@ -113,4 +113,35 @@ describe('runProcess', () => {
       delete process.env.AF_TEST_SECRET;
     }
   });
+
+  test.runIf(process.platform === 'win32')(
+    'launches CMD providers without losing arguments, stdin, or exit codes',
+    async () => {
+      const script = await writeNodeFixture(
+        "const fs = await import('node:fs'); const input = fs.readFileSync(0, 'utf8'); fs.writeSync(1, JSON.stringify({args: process.argv.slice(2), input})); process.exitCode = 23;",
+      );
+      const wrapper = path.join(path.dirname(script), 'provider.cmd');
+      await writeFile(
+        wrapper,
+        `@echo off\r\n"${process.execPath}" "${script}" %*\r\nexit /b %errorlevel%\r\n`,
+      );
+      const markerDirectory = await mkdtemp(path.join(tmpdir(), 'agent-foreman-cmd-injection-'));
+      const marker = path.join(markerDirectory, 'should-not-exist');
+      const hostileArgument = `& echo injected > "${marker}"`;
+
+      const result = await runProcess({
+        executable: wrapper,
+        args: ['argument with spaces', hostileArgument],
+        stdin: 'stdin preserved',
+        stdio: 'capture',
+      });
+
+      expect(result.exitCode).toBe(23);
+      expect(JSON.parse(result.stdout)).toEqual({
+        args: ['argument with spaces', hostileArgument],
+        input: 'stdin preserved',
+      });
+      await expect(readFile(marker)).rejects.toMatchObject({code: 'ENOENT'});
+    },
+  );
 });

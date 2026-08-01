@@ -2,7 +2,7 @@
 
 Use your smartest AI as the supervisor and your fastest AI as the worker — directly from your coding CLI.
 
-Agent Foreman is a local, approval-gated supervisor–worker orchestrator for AI coding CLIs. Codex collaborates on a structured plan and reviews the result; a Gemini-compatible or Antigravity CLI implements it in an isolated workspace. Deterministic checks run between implementation and semantic review, and nothing is copied back without a second explicit approval.
+Agent Foreman is a local, approval-gated supervisor–worker orchestrator for AI coding CLIs. You stay in the normal Codex conversation: Codex collaborates on a structured plan and reviews the result, while a Gemini-compatible or Antigravity CLI implements it in an isolated workspace. A small headless runtime enforces plan hashes, deterministic checks, durable resume and a separate apply approval.
 
 Agent Foreman improves reliability through collaborative planning, deterministic checks, iterative review and explicit human approval. It does not guarantee defect-free output.
 
@@ -11,7 +11,7 @@ Agent Foreman improves reliability through collaborative planning, deterministic
 The design reserves expensive model judgment for requirements, architecture and review while delegating implementation throughput to a faster coding agent. It also makes the two consequential boundaries—starting implementation and applying changes—visible and auditable.
 
 ```text
-User ↔ Codex supervisor: discover → discuss → draft/revise → /approve
+User ↔ Codex supervisor: discover → discuss → draft/revise → explicit approve
                                       │ frozen plan + SHA-256
                                       ▼
               isolated worker: implement ↔ deterministic repair
@@ -20,54 +20,68 @@ User ↔ Codex supervisor: discover → discuss → draft/revise → /approve
                   Codex: semantic review ↔ worker revision
                                       │ final technical approval
                                       ▼
-                   User: inspect diff → /apply → guarded apply
+                   User: inspect diff → explicit apply → guarded apply
 ```
 
 ## Installation
 
-Agent Foreman requires Node.js 22.13 or newer. From a package release:
+Agent Foreman requires Node.js 22.18 or newer. From a package release:
 
 ```sh
-pnpm add -g agent-foreman
+npm install -g agent-foreman
 af settings
 af doctor
-af install-shim codex
+af setup codex
 ```
 
-The installer displays the real binary and every managed file before asking. It never overwrites Codex or edits shell startup files. Add the printed managed directory to `PATH`, or print the command again with:
+`af setup codex` shows the exact changes, installs an explicitly invoked local skill, and registers the headless runtime as a Codex MCP stdio server through Codex's own `mcp` command. It does not replace the Codex binary, install a shim, or edit `PATH`. Restart Codex after setup.
 
-```sh
-af shim print-shell-setup codex
-```
+To remove only the hash-verified managed integration, run `af setup codex --remove`; modified or user-owned skill/MCP entries are refused.
 
 For repository development:
 
 ```sh
-pnpm install
-pnpm build
+npx pnpm@11.18.0 install
+npx pnpm@11.18.0 build
 node apps/cli/dist/main.js doctor
 ```
+
+pnpm is a contributor/build dependency, not a requirement for using the published CLI.
+
+## Platform support
+
+Agent Foreman targets Linux, macOS and Windows with Node.js 22.18+ or Node.js 24. The release matrix builds and tests all six OS/Node combinations. It also installs the packed tarball into a temporary global prefix and exercises `af`, SQLite state, managed shim installation, normal provider passthrough, exact `agent-foreman` interception, exit-code/stdin/argument preservation and uninstall. Windows runs native CMD and PowerShell shim tests; macOS runs the POSIX shim and Application Support path tests.
+
+Real provider authentication is intentionally absent from public CI. A release is cross-platform verified only after the full matrix is green; provider-version compatibility remains visible through `af doctor` and the adapter capability probes. See [platform support](docs/platform-support.md) for the exact evidence and limitations.
 
 ## Quick start
 
 ```sh
 cd my-project
-codex agent-foreman
+codex
 ```
 
-You can also use `af` or `af run`. If the selected profile has no explicit supervisor or worker model, an interactive first run opens the global profile wizard before any session, provider call or workspace is created. The wizard lets you select the real providers, discover worker models where supported, enter exact model IDs, run health checks and explicitly save the profile.
+Then explicitly invoke the skill in the normal Codex conversation:
+
+```text
+$agent-foreman Add a subtract(a, b) function and cover negative numbers.
+```
+
+Agent Foreman is dormant in every ordinary Codex message. Starting Codex, opening a repository, or asking for a normal code change does not create a session, probe the worker, or run the runtime.
+
+If the selected global profile has no explicit worker model, run `af settings`. The wizard lets you select the real worker provider, discover models where supported, enter an exact model ID, run health checks and explicitly save the profile.
 
 ```sh
 af settings
 af profile list
-codex agent-foreman
+af setup codex
 ```
 
-In a non-interactive terminal, `af settings` remains read-only and prints the effective redacted configuration. Use `--plain` in a basic terminal or CI, `--output json` for JSONL events, `--no-color`/`NO_COLOR=1` without color, and `INK_SCREEN_READER=true` for Ink's screen-reader mode.
+In a non-interactive terminal, `af settings` remains read-only and prints the effective redacted configuration. The standalone `af run` plain/JSON and Ink interfaces remain available for operations and automation, but they are not required for the primary Codex experience.
 
 ## Normal Codex usage
 
-The shim intercepts only when the first positional argument is exactly `agent-foreman`. These calls are passed to the recorded absolute Codex binary with the same argument array, environment, terminal streams, signals and exit status:
+The primary integration does not intercept the `codex` executable. All normal commands remain native Codex commands:
 
 ```sh
 codex
@@ -78,34 +92,35 @@ codex resume
 codex app-server
 ```
 
-`codex agent-foreman` starts Agent Foreman and records `codex` as the frontend provider. Dispatch depth, shim identity and `PATH` exclusion prevent recursion. `af uninstall-shim codex` removes only hash-verified managed files and is idempotent.
+Agent Foreman runs only after an explicit `$agent-foreman` invocation. The generic dispatcher and hash-verified shims remain optional compatibility tools; they are not installed by `af setup codex`.
 
 ## Collaborative plan approval
 
-The supervisor first inspects a bounded repository summary with read-only permissions, explains its understanding, asks material questions and returns a schema-validated `TaskPlan`. Use:
+Native Codex first inspects the repository read-only, explains its understanding, asks material questions and returns a schema-validated `TaskPlan`. Use:
 
 ```text
-/change <message>   create a revised plan version
-/discuss <message> continue requirement discussion
-/show-plan          show the Markdown plan
-/show-json          show its machine form
-/approve            freeze this exact version and hash
-/cancel             cancel without running the worker
+$agent-foreman change <message>  create a revised plan version
+$agent-foreman discuss <message> continue requirement discussion
+$agent-foreman show-plan         show the Markdown plan
+$agent-foreman show-json         show its machine form
+$agent-foreman approve           freeze this exact version and hash
+$agent-foreman cancel            cancel without running the worker
 ```
 
-“yes”, “ok” and “tamam” are discussion text, never approval. Workspace creation, package commands and worker execution are unreachable before `/approve`. An approved plan is immutable; changes require a new version and approval.
+The commands are namespaced because `/approve` is a built-in Codex CLI command for retrying automatic-review denials. “yes”, “ok” and “tamam” are discussion text, never approval. After `$agent-foreman approve`, the runtime presents an independent confirmation bound to the exact plan hash. Workspace creation, package commands and worker execution are unreachable before that confirmation. An approved plan is immutable; changes require a new version and approval.
 
 ## Provider configuration
 
-The working runtime providers are:
+In the primary skill path, the current native Codex conversation is the supervisor; Agent Foreman does not launch a second Codex process. The working runtime worker providers are:
 
-- `codex-cli` supervisor through probed `codex exec --json` structured output and read-only sandboxing;
 - `gemini-cli` worker through probed headless JSON mode;
 - `antigravity-cli` worker through probed print/JSON/schema/edit mode.
 
-The adapter probes installed help/version output and caches capabilities. It rejects missing structured-output flags and invalid configured models instead of inventing flags or silently choosing another model. Safe array-based `args_template` supports compatible distributions without invoking a shell. Fake providers are available only to the test suite.
+Antigravity runs in worktree file-tools-only mode by default: Agent Foreman gives it an isolated provider home and project, denies terminal/network/MCP actions, and runs deterministic quality commands itself. Hosts with a verified working Antigravity terminal sandbox may opt in with `sandbox = true`; sandbox failure never falls back to unsandboxed execution.
 
-`af settings` writes only the platform-standard global profile file. A failed provider check blocks saving. When a provider cannot enumerate models—currently the supported Codex Exec transport—the wizard shows a warning that requires a separate confirmation and preserves the exact model text; it never substitutes another model. Existing CLI profile commands and direct TOML configuration remain supported.
+The standalone CLI also retains the probed `codex-cli` supervisor adapter for non-interactive operation. Adapters reject missing structured-output flags and invalid configured models instead of inventing flags or silently choosing another model. Safe array-based `args_template` supports compatible distributions without invoking a shell. Fake providers are available only to the test suite.
+
+`af settings` writes only the platform-standard global profile file. A failed worker check blocks saving. Existing CLI profile commands and direct TOML configuration remain supported.
 
 See [configuration](docs/configuration.md) and [provider development](docs/provider-development.md).
 The repository also includes a copyable [balanced TOML example](examples/configs/balanced.toml).
@@ -118,9 +133,9 @@ See [security](docs/security.md) for the threat model and limitations.
 
 ## Workspace and apply behavior
 
-A clean Git repository gets a detached managed worktree. For a dirty repository, `/head` starts from `HEAD`, `/include` includes tracked changes after blocking sensitive paths, and `/cancel` stops. Untracked and ignored files are never copied automatically. Non-Git projects use a managed baseline snapshot that excludes `.git`, `node_modules`, Agent Foreman state, secret-like paths, symlinks and large files.
+A clean Git repository gets a detached managed worktree. For a dirty repository, `$agent-foreman head-worktree` starts from `HEAD`, `$agent-foreman include-tracked` includes tracked changes after blocking sensitive paths, and `$agent-foreman cancel` stops. Untracked and ignored files are never copied automatically. Non-Git projects use a managed baseline snapshot that excludes `.git`, `node_modules`, Agent Foreman state, secret-like paths, symlinks and large files.
 
-After final technical approval, `/diff` shows the patch, `/keep` preserves the workspace, `/discard` removes the managed workspace and `/apply` performs the separate approval. Apply validates the recorded branch/tree/file baseline first. Git uses `git apply --check`; snapshot apply validates every source file and rolls back completed writes if any write fails. Conflicts stop without deleting the execution workspace.
+After final technical approval, `$agent-foreman diff` shows the patch, `$agent-foreman keep` preserves the workspace, `$agent-foreman discard` removes the managed workspace and `$agent-foreman apply` performs the separate approval. Apply validates the recorded branch/tree/file baseline first. Git uses `git apply --check`; snapshot apply validates every source file and rolls back completed writes if any write fails. Conflicts stop without deleting the execution workspace.
 
 ## Quality gates
 
@@ -141,20 +156,11 @@ Gate stdout/stderr, exit status, duration and a stable failure fingerprint are p
 
 SQLite stores sessions, immutable plans/approvals, provider calls, iterations, reviews/findings, gates, workspaces, user decisions and token usage. Every state transition is transactional and mirrored to append-only redacted JSONL; startup reconciles a committed SQLite event missing from JSONL.
 
-```sh
-af task list
-af task show <id>
-af task logs <id>
-af task diff <id>
-af task resume <id>
-af task cancel <id>
-```
-
-Resume restores planning, execution, repair, semantic review, final review and apply boundaries. Interrupted non-idempotent provider operations are recovered from their persisted completion record when one exists; the managed workspace is preserved on pause or failure.
+Use `$agent-foreman resume <id>` in Codex to reconstruct the safe next action, or inspect it operationally with `af task show <id>`. Resume reloads the approved plan/hash, workspace, last worker evidence, quality gates and open findings. A failed initial provider call may be explicitly retried only when its isolated workspace is unchanged. Stable planning/review/apply boundaries continue directly. If the runtime stopped during another potentially non-idempotent worker or apply operation, it pauses and preserves the workspace instead of silently replaying it.
 
 ## CLI reference
 
-The implemented surface includes `af run`, `settings`, `init`, `doctor`, `version`; profile `list/create/edit/use/delete`; provider `list/doctor/models`; task `list/show/resume/cancel/logs/diff`; and shim `install-shim/uninstall-shim/status/print-shell-setup`. Run `af --help` or a command's `--help` for exact flags. Fake providers are compiled only into tests and are never selectable from the production CLI.
+The primary setup command is `af setup codex`; `af mcp serve` is the registered headless transport. The operational surface also includes `af run`, `settings`, `init`, `doctor`, `version`; profile `list/create/edit/use/delete`; provider `list/doctor/models`; task `list/show/resume/cancel/logs/diff`; and optional shim `install-shim/uninstall-shim/status/print-shell-setup`. Run `af --help` or a command's `--help` for exact flags. Fake providers are compiled only into tests and are never selectable from the production CLI.
 
 ## Troubleshooting
 
@@ -162,7 +168,7 @@ Start with `af doctor`. It reports `PASS`, `WARN`, `FAIL` or `SKIP` for Node, Gi
 
 ## Roadmap
 
-The core daily-use path is Codex Exec as supervisor plus Gemini-compatible/Antigravity CLI as worker. Additional transports can implement the existing provider contracts: Codex App Server, Claude CLI and carefully capability-scoped OpenAI-compatible planning/review adapters. Raw models do not receive an unrestricted shell or filesystem harness.
+The core daily-use path is native Codex as supervisor plus the headless runtime and a Gemini-compatible/Antigravity CLI worker. Additional frontends and transports can implement the same provider-neutral contracts. Raw models do not receive an unrestricted shell or filesystem harness.
 
 ## Contributing
 

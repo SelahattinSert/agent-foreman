@@ -9,7 +9,11 @@ import {
 import {ConfigurationError} from '@agent-foreman/core';
 import {getAgentForemanPlatformPaths} from '@agent-foreman/process';
 
-import {discoverSettingsWorkerModels, validateSettingsDraft} from '../settings/provider-catalog.js';
+import {
+  discoverSettingsSupervisorModels,
+  discoverSettingsWorkerModels,
+  validateSettingsDraft,
+} from '../settings/provider-catalog.js';
 import {GlobalProfileService} from '../settings/profile-service.js';
 import {SettingsController, type SettingsWizardResult} from '../settings/settings-controller.js';
 import {runSettingsTui} from '../tui/settings-tui.js';
@@ -36,8 +40,11 @@ const runGlobalSettingsTui = async (
   const cacheDirectory = path.join(paths.dataDirectory, 'cache');
   const controller = new SettingsController({
     service,
+    nativeSupervisor: true,
     ...(options.initialProfile === undefined ? {} : {initialProfile: options.initialProfile}),
     validate: async (draft) => await validateSettingsDraft(draft, {service, cacheDirectory}),
+    discoverSupervisorModels: async (providerId, draft) =>
+      await discoverSettingsSupervisorModels(providerId, draft, {service, cacheDirectory}),
     discoverWorkerModels: async (providerId, draft) =>
       await discoverSettingsWorkerModels(providerId, draft, {service, cacheDirectory}),
   });

@@ -10,7 +10,7 @@
     }
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean"
+    "build": "tsdown --config ../../tsdown.config.ts src/index.ts --format esm --dts --clean"
   },
   "dependencies": {
     "@agent-foreman/contracts": "workspace:*",

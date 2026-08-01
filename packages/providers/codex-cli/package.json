@@ -10,7 +10,7 @@
     }
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean"
+    "build": "tsdown --config ../../../tsdown.config.ts src/index.ts --format esm --dts --clean"
   },
   "dependencies": {
     "@agent-foreman/contracts": "workspace:*",
@@ -19,6 +19,7 @@
     "@agent-foreman/process": "workspace:*",
     "@agent-foreman/prompts": "workspace:*",
     "@agent-foreman/provider-sdk": "workspace:*",
+    "cross-spawn": "7.0.6",
     "zod": "catalog:"
   }
 }

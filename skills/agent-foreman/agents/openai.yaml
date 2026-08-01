@@ -1,0 +1,7 @@
+interface:
+  display_name: 'Agent Foreman'
+  short_description: 'Plan safely, delegate work, and review changes'
+  default_prompt: 'Use $agent-foreman to plan and implement this task with an isolated worker.'
+
+policy:
+  allow_implicit_invocation: false

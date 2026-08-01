@@ -115,6 +115,23 @@ describe('transitionWorkflow', () => {
     expect(ready.workspace).toEqual(workspace);
   });
 
+  test('stores the applied workspace on the changes-applied event', () => {
+    const workspace = {
+      id: 'workspace-001',
+      path: '/tmp/worktree',
+      mode: 'worktree' as const,
+      status: 'APPLIED' as const,
+      createdAt: at,
+    };
+    const completed = transitionWorkflow(
+      sessionIn('APPLYING_CHANGES'),
+      {type: 'CHANGES_APPLIED', workspace},
+      at,
+    );
+
+    expect(completed).toMatchObject({state: 'COMPLETED', workspace});
+  });
+
   test('pauses and resumes only to the explicit saved state', () => {
     const paused = transitionWorkflow(
       sessionIn('SUPERVISOR_REVIEW'),
@@ -130,5 +147,21 @@ describe('transitionWorkflow', () => {
     );
     expect(resumed).toMatchObject({state: 'SUPERVISOR_REVIEW'});
     expect(resumed.statusMessage).toBeUndefined();
+  });
+
+  test('starts a failed worker retry as a new auditable iteration', () => {
+    const paused = {
+      ...sessionIn('PAUSED'),
+      iteration: 1,
+      statusMessage: 'Worker execution failed.',
+    };
+
+    const retried = transitionWorkflow(paused, {type: 'WORKER_RETRY_STARTED'}, at);
+
+    expect(retried).toMatchObject({state: 'EXECUTING_WORKER', iteration: 2});
+    expect(retried.statusMessage).toBeUndefined();
+    expect(() =>
+      transitionWorkflow(sessionIn('PLAN_APPROVED'), {type: 'WORKER_RETRY_STARTED'}, at),
+    ).toThrow(InvalidStateTransitionError);
   });
 });

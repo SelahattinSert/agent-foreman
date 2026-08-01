@@ -1,4 +1,4 @@
-import {mkdtemp, rm, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 
@@ -8,6 +8,7 @@ import {
   ProviderExecutionError,
   ProviderOutputValidationError,
   ProviderTimeoutError,
+  PermissionDeniedError,
   TaskCancelledError,
 } from '@agent-foreman/core';
 import {redactValue} from '@agent-foreman/observability';
@@ -48,6 +49,9 @@ export interface HeadlessWorkerCliTransportOptions {
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly extraArgs?: readonly string[];
   readonly argsTemplate?: readonly string[];
+  readonly isolatedAntigravitySettings?: boolean;
+  readonly newProject?: boolean;
+  readonly disableSlashCommands?: boolean;
 }
 
 const safeEnvironmentNames = [
@@ -81,7 +85,8 @@ const unwrapOutput = (raw: unknown): WorkerCliTransportResponse => {
   const record = raw as Record<string, unknown>;
   const sessionValue = record.conversation_id ?? record.conversationId ?? record.session_id;
   const providerSessionId = typeof sessionValue === 'string' ? sessionValue : undefined;
-  const candidate = record.response ?? record.result ?? record.output ?? raw;
+  const candidate =
+    record.structured_output ?? record.response ?? record.result ?? record.output ?? raw;
   let value: unknown = candidate;
   if (typeof candidate === 'string') {
     try {
@@ -93,6 +98,46 @@ const unwrapOutput = (raw: unknown): WorkerCliTransportResponse => {
     }
   }
   return {value, ...(providerSessionId === undefined ? {} : {providerSessionId})};
+};
+
+const antigravitySettings = (cwd: string, sandbox: boolean): Record<string, unknown> => ({
+  allowNonWorkspaceAccess: false,
+  enableTerminalSandbox: sandbox,
+  toolPermission: 'proceed-in-sandbox',
+  permissions: {
+    allow: [`write_file(${path.resolve(cwd)})`],
+    ask: [],
+    deny: [
+      ...(sandbox ? [] : ['command(*)', 'unsandboxed(*)']),
+      'read_url(*)',
+      'execute_url(*)',
+      'mcp(*)',
+      `write_file(${path.join(path.resolve(cwd), '.git')})`,
+    ],
+  },
+});
+
+const isHeadlessPermissionDenial = (stderr: string): boolean =>
+  stderr.includes('jetski: no output produced') &&
+  stderr.includes('permission') &&
+  stderr.includes('headless mode cannot prompt');
+
+const readFailureSummary = async (logPath: string): Promise<string | undefined> => {
+  try {
+    const lines = (await readFile(logPath, 'utf8')).split('\n');
+    const relevant = lines.filter(
+      (line) =>
+        line.includes('permission check failed') ||
+        line.includes('keytool error:') ||
+        line.includes('connecting to sandbox server:'),
+    );
+    const selected = relevant.at(-1)?.trim();
+    if (selected === undefined || selected === '') return undefined;
+    const redacted = redactValue(selected.slice(0, 2_000));
+    return typeof redacted === 'string' ? redacted : undefined;
+  } catch {
+    return undefined;
+  }
 };
 
 const renderArgsTemplate = (
@@ -143,16 +188,42 @@ export class HeadlessWorkerCliTransport implements WorkerCliTransport {
         'Worker CLI does not support the requested session resume.',
       );
     }
+    if (this.options.newProject === true && !capabilities.newProject) {
+      throw new ProviderCapabilityError(
+        'Worker CLI cannot bind a new provider project to the isolated execution workspace.',
+      );
+    }
+    if (this.options.disableSlashCommands === true && !capabilities.disableSlashCommands) {
+      throw new ProviderCapabilityError(
+        'Worker CLI cannot disable slash-command expansion for literal structured prompts.',
+      );
+    }
     const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'agent-foreman-worker-'));
     const schemaPath = path.join(temporaryDirectory, 'output-schema.json');
+    const logPath = path.join(temporaryDirectory, 'agy.log');
     await writeFile(schemaPath, JSON.stringify(input.outputSchema), {mode: 0o600});
+    const environment = environmentFor(input.environmentAllowlist, this.options.environment);
+    if (this.options.isolatedAntigravitySettings === true) {
+      const isolatedHome = path.join(temporaryDirectory, 'home');
+      const settingsDirectory = path.join(isolatedHome, '.gemini', 'antigravity-cli');
+      await mkdir(settingsDirectory, {recursive: true, mode: 0o700});
+      await writeFile(
+        path.join(settingsDirectory, 'settings.json'),
+        `${JSON.stringify(antigravitySettings(input.cwd, this.options.sandbox !== false), null, 2)}\n`,
+        {mode: 0o600},
+      );
+      environment.HOME = isolatedHome;
+      environment.USERPROFILE = isolatedHome;
+    }
     const controller = new AbortController();
     this.active.set(input.executionId, controller);
     const timeout = `${String(Math.max(1, Math.ceil(input.timeoutMs / 1_000)))}s`;
     const args =
       this.options.argsTemplate === undefined
         ? [
-            ...(capabilities.promptFlag === '--prompt' ? ['--prompt', input.prompt] : ['--print']),
+            ...(capabilities.promptFlag === '--prompt'
+              ? ['--prompt', input.prompt]
+              : ['--print', input.prompt]),
             '--output-format',
             'json',
             '--json-schema',
@@ -165,11 +236,14 @@ export class HeadlessWorkerCliTransport implements WorkerCliTransport {
               ? ['--effort', input.effort]
               : []),
             ...(input.providerSessionId === undefined
-              ? []
+              ? this.options.newProject === true
+                ? ['--new-project']
+                : []
               : ['--conversation', input.providerSessionId]),
+            ...(this.options.disableSlashCommands === true ? ['--disable-slash-commands'] : []),
+            ...(capabilities.logFile ? ['--log-file', logPath] : []),
             ...(capabilities.printTimeout ? ['--print-timeout', timeout] : []),
             ...(this.options.extraArgs ?? []),
-            ...(capabilities.promptFlag === '--prompt' ? [] : [input.prompt]),
           ]
         : [
             ...renderArgsTemplate(this.options.argsTemplate, {
@@ -180,7 +254,13 @@ export class HeadlessWorkerCliTransport implements WorkerCliTransport {
               conversation: input.providerSessionId ?? '',
               effort: input.effort ?? '',
               workspace: input.cwd,
+              log: logPath,
             }),
+            ...(input.providerSessionId === undefined && this.options.newProject === true
+              ? ['--new-project']
+              : []),
+            ...(this.options.disableSlashCommands === true ? ['--disable-slash-commands'] : []),
+            ...(capabilities.logFile ? ['--log-file', logPath] : []),
             ...(this.options.extraArgs ?? []),
           ];
     try {
@@ -188,7 +268,7 @@ export class HeadlessWorkerCliTransport implements WorkerCliTransport {
         executable: this.options.binary,
         args,
         cwd: input.cwd,
-        environment: environmentFor(input.environmentAllowlist, this.options.environment),
+        environment,
         inheritEnvironment: false,
         stdio: 'capture',
         signal: AbortSignal.any([input.signal, controller.signal]),
@@ -201,6 +281,18 @@ export class HeadlessWorkerCliTransport implements WorkerCliTransport {
         });
       }
       if (result.aborted) throw new TaskCancelledError('Worker CLI execution was cancelled.');
+      if (isHeadlessPermissionDenial(result.stderr)) {
+        const detail = await readFailureSummary(logPath);
+        throw new PermissionDeniedError(
+          `Worker CLI auto-denied a required permission in headless mode.${detail === undefined ? '' : ` ${detail}`}`,
+          {
+            diagnostics: {
+              executionId: input.executionId,
+              stderr: redactValue(result.stderr),
+            },
+          },
+        );
+      }
       if (result.exitCode !== 0) {
         throw new ProviderExecutionError('Worker CLI execution failed.', {
           diagnostics: {

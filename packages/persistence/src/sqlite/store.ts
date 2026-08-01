@@ -6,6 +6,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 
 import {
+  ApprovalChallengeSchema,
   ExecutionWorkspaceSchema,
   QualityGateReportSchema,
   ReviewDecisionSchema,
@@ -15,16 +16,21 @@ import {
   TokenUsageSchema,
   WorkflowEventRecordSchema,
   WorkerExecutionResultSchema,
+  type ApprovalChallenge,
   type ExecutionWorkspace,
   type TaskPlan,
   type TaskSession,
   type WorkflowEventRecord,
 } from '@agent-foreman/contracts';
-import {PersistenceError} from '@agent-foreman/core';
+import {PermissionDeniedError, PersistenceError} from '@agent-foreman/core';
 import {redactValue} from '@agent-foreman/observability';
 
 import {JsonlAuditLog} from '../jsonl/audit-log.js';
 import type {
+  ApprovalChallengeRepository,
+  CommitApplyApprovalInput,
+  CommitPlanApprovalInput,
+  ConsumeApprovalChallengeInput,
   PlanApprovalRecord,
   PlanRecord,
   ProviderExecutionRecord,
@@ -91,6 +97,45 @@ interface ReviewDecisionRow {
   readonly created_at: string;
   readonly decision_json: string;
 }
+interface QualityGateRunRow {
+  readonly id: string;
+  readonly session_id: string;
+  readonly iteration: number;
+  readonly report_json: string;
+}
+interface ApprovalChallengeRow {
+  readonly id: string;
+  readonly session_id: string;
+  readonly purpose: ApprovalChallenge['purpose'];
+  readonly subject_hash: string;
+  readonly plan_version: number | null;
+  readonly source_baseline: string | null;
+  readonly created_at: string;
+  readonly expires_at: string;
+  readonly status: ApprovalChallenge['status'];
+  readonly consumed_at: string | null;
+}
+interface PlanApprovalRow {
+  readonly task_id: string;
+  readonly plan_version: number;
+  readonly plan_hash: string;
+  readonly approved_at: string;
+}
+
+type ChallengeFailure = 'expired' | 'mismatch' | 'not-pending';
+
+const challengeFailure = (
+  error: ChallengeFailure,
+  input: ConsumeApprovalChallengeInput,
+): InstanceType<typeof PermissionDeniedError> =>
+  new PermissionDeniedError(
+    error === 'expired'
+      ? 'The approval challenge has expired.'
+      : error === 'not-pending'
+        ? 'The approval challenge is not pending or was already used.'
+        : 'The approval authorization does not match this session, purpose, or hash.',
+    {diagnostics: {challengeId: input.challengeId, purpose: input.purpose}},
+  );
 
 const json = (value: unknown): string => JSON.stringify(value);
 const parseUnknown = (value: string): unknown => JSON.parse(value) as unknown;
@@ -103,7 +148,9 @@ const optional = <K extends string, V>(
   return result;
 };
 
-export class SqliteWorkflowStore implements WorkflowStore, RuntimeRecordRepository {
+export class SqliteWorkflowStore
+  implements WorkflowStore, RuntimeRecordRepository, ApprovalChallengeRepository
+{
   private readonly auditLog: JsonlAuditLog | undefined;
 
   private constructor(
@@ -253,6 +300,218 @@ export class SqliteWorkflowStore implements WorkflowStore, RuntimeRecordReposito
         'INSERT INTO plan_approvals(task_id, plan_version, plan_hash, approved_at) VALUES (?, ?, ?, ?)',
       )
       .run(approval.taskId, approval.planVersion, approval.hash, approval.approvedAt);
+  }
+
+  public async getPlanApproval(
+    taskId: string,
+    planVersion: number,
+  ): Promise<PlanApprovalRecord | undefined> {
+    const row = this.database
+      .prepare(
+        `SELECT task_id, plan_version, plan_hash, approved_at
+         FROM plan_approvals WHERE task_id = ? AND plan_version = ?`,
+      )
+      .get(taskId, planVersion) as PlanApprovalRow | undefined;
+    if (row === undefined) return undefined;
+    return {
+      taskId: row.task_id,
+      planVersion: row.plan_version,
+      hash: row.plan_hash,
+      approvedAt: row.approved_at,
+    };
+  }
+
+  public async createApprovalChallenge(rawChallenge: ApprovalChallenge): Promise<void> {
+    const challenge = ApprovalChallengeSchema.parse(rawChallenge);
+    if (challenge.status !== 'PENDING') {
+      throw new PersistenceError('A new approval challenge must be pending.');
+    }
+    const transaction = this.database.transaction((): void => {
+      this.database
+        .prepare(
+          `UPDATE approval_challenges
+           SET status = CASE WHEN expires_at <= ? THEN 'EXPIRED' ELSE 'CANCELLED' END
+           WHERE session_id = ? AND purpose = ? AND status = 'PENDING'`,
+        )
+        .run(challenge.createdAt, challenge.sessionId, challenge.purpose);
+      this.database
+        .prepare(
+          `INSERT INTO approval_challenges(
+             id, session_id, purpose, subject_hash, plan_version, source_baseline,
+             created_at, expires_at, status, consumed_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          challenge.id,
+          challenge.sessionId,
+          challenge.purpose,
+          challenge.subjectHash,
+          challenge.planVersion ?? null,
+          challenge.sourceBaseline ?? null,
+          challenge.createdAt,
+          challenge.expiresAt,
+          challenge.status,
+          challenge.consumedAt ?? null,
+        );
+    });
+    try {
+      transaction.immediate();
+    } catch (cause: unknown) {
+      throw new PersistenceError('Could not create the approval challenge.', {cause});
+    }
+  }
+
+  public async getApprovalChallenge(challengeId: string): Promise<ApprovalChallenge | undefined> {
+    const row = this.database
+      .prepare('SELECT * FROM approval_challenges WHERE id = ?')
+      .get(challengeId) as ApprovalChallengeRow | undefined;
+    return row === undefined ? undefined : this.approvalChallengeFromRow(row);
+  }
+
+  public async consumeApprovalChallenge(
+    input: ConsumeApprovalChallengeInput,
+  ): Promise<ApprovalChallenge> {
+    type ConsumptionResult =
+      | {readonly challenge: ApprovalChallenge}
+      | {readonly error: 'expired' | 'mismatch' | 'not-pending'};
+    const transaction = this.database.transaction((): ConsumptionResult => {
+      const row = this.database
+        .prepare('SELECT * FROM approval_challenges WHERE id = ?')
+        .get(input.challengeId) as ApprovalChallengeRow | undefined;
+      if (
+        row?.session_id !== input.sessionId ||
+        row.purpose !== input.purpose ||
+        row.subject_hash !== input.subjectHash
+      ) {
+        return {error: 'mismatch'};
+      }
+      if (row.status !== 'PENDING') return {error: 'not-pending'};
+      if (row.expires_at <= input.consumedAt) {
+        this.database
+          .prepare("UPDATE approval_challenges SET status = 'EXPIRED' WHERE id = ?")
+          .run(input.challengeId);
+        return {error: 'expired'};
+      }
+      const update = this.database
+        .prepare(
+          `UPDATE approval_challenges SET status = 'CONSUMED', consumed_at = ?
+           WHERE id = ? AND status = 'PENDING'`,
+        )
+        .run(input.consumedAt, input.challengeId);
+      if (update.changes !== 1) return {error: 'not-pending'};
+      const consumed = this.database
+        .prepare('SELECT * FROM approval_challenges WHERE id = ?')
+        .get(input.challengeId) as ApprovalChallengeRow;
+      return {challenge: this.approvalChallengeFromRow(consumed)};
+    });
+    const result = transaction.immediate();
+    if ('challenge' in result) return result.challenge;
+    const message =
+      result.error === 'expired'
+        ? 'The approval challenge has expired.'
+        : result.error === 'not-pending'
+          ? 'The approval challenge is not pending or was already used.'
+          : 'The approval authorization does not match this session, purpose, or hash.';
+    throw new PermissionDeniedError(message, {
+      diagnostics: {challengeId: input.challengeId, purpose: input.purpose},
+    });
+  }
+
+  public async cancelApprovalChallenge(challengeId: string, sessionId: string): Promise<void> {
+    const result = this.database
+      .prepare(
+        `UPDATE approval_challenges SET status = 'CANCELLED'
+         WHERE id = ? AND session_id = ? AND status = 'PENDING'`,
+      )
+      .run(challengeId, sessionId);
+    if (result.changes !== 1) {
+      throw new PermissionDeniedError('The approval challenge cannot be cancelled.', {
+        diagnostics: {challengeId, sessionId},
+      });
+    }
+  }
+
+  public async commitPlanApproval(input: CommitPlanApprovalInput): Promise<void> {
+    const plan = TaskPlanSchema.parse(input.plan);
+    const previous = TaskSessionSchema.parse(input.previousSession);
+    const next = TaskSessionSchema.parse(input.nextSession);
+    const event = WorkflowEventRecordSchema.parse(redactValue(input.event));
+    if (
+      input.challenge.purpose !== 'PLAN' ||
+      plan.status !== 'APPROVED' ||
+      plan.taskId !== previous.id ||
+      input.approval.taskId !== previous.id ||
+      input.approval.planVersion !== plan.version ||
+      input.approval.hash !== input.planHash ||
+      input.approval.approvedAt !== plan.approvedAt
+    ) {
+      throw new PersistenceError('Plan approval transaction payload is inconsistent.');
+    }
+    const transaction = this.database.transaction((): ChallengeFailure | undefined => {
+      const challenge = this.challengeFailureWithinTransaction(input.challenge, plan.version);
+      if (challenge !== undefined) return challenge;
+      const existing = this.database
+        .prepare('SELECT plan_json FROM plans WHERE task_id = ? AND version = ?')
+        .get(plan.taskId, plan.version) as {plan_json: string} | undefined;
+      if (existing === undefined) {
+        throw new PersistenceError('The draft plan no longer exists.');
+      }
+      const existingPlan = TaskPlanSchema.parse(parseUnknown(existing.plan_json));
+      if (existingPlan.status !== 'DRAFT') {
+        throw new PersistenceError('Only a draft plan may be frozen.');
+      }
+      this.database
+        .prepare(
+          `UPDATE plans SET status = ?, plan_hash = ?, markdown = ?, plan_json = ?, approved_at = ?
+           WHERE task_id = ? AND version = ?`,
+        )
+        .run(
+          plan.status,
+          input.planHash,
+          input.markdown,
+          json(plan),
+          plan.approvedAt ?? null,
+          plan.taskId,
+          plan.version,
+        );
+      this.database
+        .prepare(
+          'INSERT INTO plan_approvals(task_id, plan_version, plan_hash, approved_at) VALUES (?, ?, ?, ?)',
+        )
+        .run(
+          input.approval.taskId,
+          input.approval.planVersion,
+          input.approval.hash,
+          input.approval.approvedAt,
+        );
+      this.writeTransitionRows(previous, next, event);
+      return undefined;
+    });
+    const failure = transaction.immediate();
+    if (failure !== undefined) throw challengeFailure(failure, input.challenge);
+    await this.reconcileAuditLog();
+  }
+
+  public async commitApplyApproval(input: CommitApplyApprovalInput): Promise<void> {
+    const previous = TaskSessionSchema.parse(input.previousSession);
+    const next = TaskSessionSchema.parse(input.nextSession);
+    const event = WorkflowEventRecordSchema.parse(redactValue(input.event));
+    if (input.challenge.purpose !== 'APPLY') {
+      throw new PersistenceError('Apply approval transaction payload is inconsistent.');
+    }
+    const transaction = this.database.transaction((): ChallengeFailure | undefined => {
+      const failure = this.challengeFailureWithinTransaction(
+        input.challenge,
+        undefined,
+        input.sourceBaseline,
+      );
+      if (failure !== undefined) return failure;
+      this.writeTransitionRows(previous, next, event);
+      return undefined;
+    });
+    const failure = transaction.immediate();
+    if (failure !== undefined) throw challengeFailure(failure, input.challenge);
+    await this.reconcileAuditLog();
   }
 
   public async listEvents(sessionId: string): Promise<WorkflowEventRecord[]> {
@@ -504,24 +763,24 @@ export class SqliteWorkflowStore implements WorkflowStore, RuntimeRecordReposito
          WHERE session_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1`,
       )
       .get(sessionId) as ProviderExecutionRow | undefined;
-    const workerRow = this.database
+    const workerRows = this.database
       .prepare(
         `SELECT * FROM worker_iterations
-         WHERE session_id = ? ORDER BY iteration DESC, rowid DESC LIMIT 1`,
+         WHERE session_id = ? ORDER BY started_at, rowid`,
       )
-      .get(sessionId) as WorkerIterationRow | undefined;
-    const qualityRow = this.database
+      .all(sessionId) as readonly WorkerIterationRow[];
+    const qualityRows = this.database
       .prepare(
-        `SELECT report_json AS value FROM quality_gate_runs
-         WHERE session_id = ? ORDER BY iteration DESC, rowid DESC LIMIT 1`,
+        `SELECT id, session_id, iteration, report_json FROM quality_gate_runs
+         WHERE session_id = ? ORDER BY started_at, rowid`,
       )
-      .get(sessionId) as JsonRow | undefined;
-    const reviewRow = this.database
+      .all(sessionId) as readonly QualityGateRunRow[];
+    const reviewRows = this.database
       .prepare(
         `SELECT * FROM review_decisions
-         WHERE session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+         WHERE session_id = ? ORDER BY created_at, rowid`,
       )
-      .get(sessionId) as ReviewDecisionRow | undefined;
+      .all(sessionId) as readonly ReviewDecisionRow[];
     const workspaceRow = this.database
       .prepare(
         `SELECT workspace_json AS value FROM workspace_records
@@ -529,8 +788,26 @@ export class SqliteWorkflowStore implements WorkflowStore, RuntimeRecordReposito
       )
       .get(sessionId) as JsonRow | undefined;
 
+    const workerIterations = workerRows.map((row) => this.workerIterationFromRow(row));
+    const reviewDecisions = reviewRows.map((row) => this.reviewDecisionFromRow(row));
+    const qualityGateRuns = qualityRows.map((row) => ({
+      id: row.id,
+      sessionId: row.session_id,
+      iteration: row.iteration,
+      report: QualityGateReportSchema.parse(parseUnknown(row.report_json)),
+    }));
+    const lastWorkerIteration = workerIterations.at(-1);
+    const lastReviewDecision = reviewDecisions.at(-1);
+    const latestQualityGateReport = qualityGateRuns.at(-1)?.report;
+    const workspace =
+      workspaceRow === undefined
+        ? session.workspace
+        : ExecutionWorkspaceSchema.parse(parseUnknown(workspaceRow.value));
+    const resumedSession =
+      workspace === undefined ? session : TaskSessionSchema.parse({...session, workspace});
+
     return {
-      session,
+      session: resumedSession,
       ...optional('currentPlan', currentPlan),
       ...optional('approvedPlan', approvedPlan),
       events: await this.listEvents(sessionId),
@@ -539,35 +816,13 @@ export class SqliteWorkflowStore implements WorkflowStore, RuntimeRecordReposito
         'lastProviderExecution',
         providerRow === undefined ? undefined : this.providerExecutionFromRow(providerRow),
       ),
-      ...optional(
-        'lastWorkerIteration',
-        workerRow === undefined ? undefined : this.workerIterationFromRow(workerRow),
-      ),
-      ...optional(
-        'lastReviewDecision',
-        reviewRow === undefined
-          ? undefined
-          : {
-              id: reviewRow.id,
-              sessionId: reviewRow.session_id,
-              iteration: reviewRow.iteration,
-              phase: reviewRow.phase,
-              createdAt: reviewRow.created_at,
-              decision: ReviewDecisionSchema.parse(parseUnknown(reviewRow.decision_json)),
-            },
-      ),
-      ...optional(
-        'latestQualityGateReport',
-        qualityRow === undefined
-          ? undefined
-          : QualityGateReportSchema.parse(parseUnknown(qualityRow.value)),
-      ),
-      ...optional(
-        'workspace',
-        workspaceRow === undefined
-          ? session.workspace
-          : ExecutionWorkspaceSchema.parse(parseUnknown(workspaceRow.value)),
-      ),
+      ...optional('lastWorkerIteration', lastWorkerIteration),
+      ...optional('lastReviewDecision', lastReviewDecision),
+      ...optional('latestQualityGateReport', latestQualityGateReport),
+      workerIterations,
+      reviewDecisions,
+      qualityGateRuns,
+      ...optional('workspace', workspace),
     };
   }
 
@@ -586,6 +841,79 @@ export class SqliteWorkflowStore implements WorkflowStore, RuntimeRecordReposito
         .prepare('UPDATE workflow_events SET audit_exported = 1 WHERE id = ?')
         .run(event.id);
     }
+  }
+
+  private challengeFailureWithinTransaction(
+    input: ConsumeApprovalChallengeInput,
+    planVersion?: number,
+    sourceBaseline?: string,
+  ): ChallengeFailure | undefined {
+    const row = this.database
+      .prepare('SELECT * FROM approval_challenges WHERE id = ?')
+      .get(input.challengeId) as ApprovalChallengeRow | undefined;
+    if (
+      row?.session_id !== input.sessionId ||
+      row.purpose !== input.purpose ||
+      row.subject_hash !== input.subjectHash ||
+      (planVersion !== undefined && row.plan_version !== planVersion) ||
+      (sourceBaseline !== undefined && row.source_baseline !== sourceBaseline)
+    ) {
+      return 'mismatch';
+    }
+    if (row.status !== 'PENDING') return 'not-pending';
+    if (row.expires_at <= input.consumedAt) {
+      this.database
+        .prepare("UPDATE approval_challenges SET status = 'EXPIRED' WHERE id = ?")
+        .run(input.challengeId);
+      return 'expired';
+    }
+    const update = this.database
+      .prepare(
+        `UPDATE approval_challenges SET status = 'CONSUMED', consumed_at = ?
+         WHERE id = ? AND status = 'PENDING'`,
+      )
+      .run(input.consumedAt, input.challengeId);
+    return update.changes === 1 ? undefined : 'not-pending';
+  }
+
+  private writeTransitionRows(
+    previous: TaskSession,
+    next: TaskSession,
+    event: WorkflowEventRecord,
+  ): void {
+    const current = this.database
+      .prepare('SELECT state, updated_at FROM sessions WHERE id = ?')
+      .get(previous.id) as {state: string; updated_at: string} | undefined;
+    if (current?.state !== previous.state || current.updated_at !== previous.updatedAt) {
+      throw new PersistenceError(`Cannot commit stale transition for session ${previous.id}.`);
+    }
+    if (
+      next.id !== previous.id ||
+      event.sessionId !== previous.id ||
+      event.previousState !== previous.state ||
+      event.nextState !== next.state
+    ) {
+      throw new PersistenceError(`Transition payload is inconsistent for session ${previous.id}.`);
+    }
+    this.database
+      .prepare('UPDATE sessions SET updated_at = ?, state = ?, session_json = ? WHERE id = ?')
+      .run(next.updatedAt, next.state, json(next), next.id);
+    this.database
+      .prepare(
+        `INSERT INTO workflow_events(
+           id, session_id, timestamp, previous_state, next_state, event_type, event_json, audit_exported
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        event.id,
+        event.sessionId,
+        event.timestamp,
+        event.previousState,
+        event.nextState,
+        event.event.type,
+        json(event),
+        this.auditLog === undefined ? 1 : 0,
+      );
   }
 
   private providerExecutionFromRow(row: ProviderExecutionRow): ProviderExecutionRecord {
@@ -622,5 +950,32 @@ export class SqliteWorkflowStore implements WorkflowStore, RuntimeRecordReposito
       ...optional('diffHash', row.diff_hash),
       ...optional('providerResponseHash', row.provider_response_hash),
     };
+  }
+
+  private reviewDecisionFromRow(row: ReviewDecisionRow): ReviewDecisionRecord {
+    return {
+      id: row.id,
+      sessionId: row.session_id,
+      iteration: row.iteration,
+      phase: row.phase,
+      createdAt: row.created_at,
+      decision: ReviewDecisionSchema.parse(parseUnknown(row.decision_json)),
+    };
+  }
+
+  private approvalChallengeFromRow(row: ApprovalChallengeRow): ApprovalChallenge {
+    return ApprovalChallengeSchema.parse({
+      schemaVersion: 1,
+      id: row.id,
+      sessionId: row.session_id,
+      purpose: row.purpose,
+      subjectHash: row.subject_hash,
+      ...optional('planVersion', row.plan_version),
+      ...optional('sourceBaseline', row.source_baseline),
+      createdAt: row.created_at,
+      expiresAt: row.expires_at,
+      status: row.status,
+      ...optional('consumedAt', row.consumed_at),
+    });
   }
 }

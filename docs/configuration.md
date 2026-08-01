@@ -15,14 +15,15 @@ Run the terminal settings UI instead of editing TOML or remembering profile flag
 ```sh
 af settings
 af profile list
-codex agent-foreman
+af setup codex
+# restart Codex, then invoke $agent-foreman
 ```
 
 `af settings` opens the global profile wizard only in an interactive terminal. It writes nothing until both configured providers have been checked and you choose **Save global profile**. A failed check blocks saving; a warning requires a separate confirmation. In pipes and CI, the same command prints the redacted effective configuration and never writes a file.
 
-The wizard selects or creates a named global profile, chooses a supported supervisor and worker, accepts exact model IDs, discovers worker models when the installed adapter advertises that capability, and displays provider health before review. It has no secret input fields. Arrow keys select, Enter continues, Backspace edits text, and Escape cancels without writing. `NO_COLOR=1` and `INK_SCREEN_READER=true` remain supported.
+The wizard selects or creates a named global profile, identifies the current Codex conversation as the native supervisor, and asks only for the worker provider and exact worker model. It discovers worker models when the installed adapter advertises that capability and displays worker health before review. Existing standalone supervisor settings are preserved; configure them through the profile commands when the secondary standalone workflow is needed. The wizard has no secret input fields. Arrow keys select, Enter continues, Backspace edits text, and Escape cancels without writing. `NO_COLOR=1` and `INK_SCREEN_READER=true` remain supported.
 
-When an interactive task starts without an explicit supervisor or worker model, Agent Foreman opens the same wizard before it creates a session or calls a provider. The saved global profile is selected for that invocation. Project configuration is never silently rewritten; normal precedence remains CLI flags → project config → selected global profile → global config → safe defaults.
+The saved global profile is selected by the MCP runtime for the current project. Project configuration is never silently rewritten; normal precedence remains CLI flags → project config → selected global profile → global config → safe defaults.
 
 ## Working example
 
@@ -70,7 +71,7 @@ ignore_user_config = true
 
 [providers.antigravity-cli]
 binary = "agy"
-sandbox = true
+sandbox = false
 
 [quality]
 require_supervisor_approval = true
@@ -86,6 +87,10 @@ command = ["pnpm", "test"]
 required = true
 timeout_seconds = 600
 ```
+
+For Antigravity CLI, omitted `sandbox` currently defaults to `false`, which means **worktree file-tools-only mode**: Agent Foreman creates an isolated provider home, binds a fresh Antigravity project to the execution worktree, disables slash expansion, denies every terminal command, URL action and MCP tool, and leaves build/test/lint/typecheck execution to Agent Foreman's deterministic quality gates. This is the safe portable mode for Antigravity CLI 1.1.9.
+
+Set `sandbox = true` only when `agy --sandbox` is known to start successfully on the host. That mode enables Antigravity's terminal sandbox while preserving the isolated provider settings. Agent Foreman never falls back from a failed sandbox to unsandboxed terminal execution.
 
 `smart` selects a Git worktree or a non-Git snapshot. `worktree` requires Git and `snapshot` forces a managed copy even for Git projects. The schema recognizes `current` for configuration compatibility, but the runtime rejects it: allowing the worker to edit the source directory before `/apply` would violate the separate apply-approval invariant.
 

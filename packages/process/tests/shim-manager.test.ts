@@ -117,4 +117,29 @@ describe('shim manager', () => {
       "$env:PATH = 'C:\\Agent Foreman\\bin;' + $env:PATH",
     );
   });
+
+  test('writes both CMD and PowerShell shims for Windows without touching the real binary', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'agent-foreman-windows-shim-'));
+    const realBinary = await createFixture(root, 'codex-real.cmd', '@echo off\r\nexit /b 0\r\n');
+    const dispatcher = await createFixture(root, 'dispatcher.mjs', 'process.exitCode = 0;');
+    const originalRealBinary = await readFile(realBinary, 'utf8');
+
+    const installed = await installShim({
+      providerId: 'codex',
+      binaryName: 'codex',
+      realBinaryPath: realBinary,
+      dispatcherEntrypoint: dispatcher,
+      nodeExecutable: process.execPath,
+      dataDirectory: path.join(root, 'data'),
+      platform: 'win32',
+    });
+
+    expect(installed.shimPaths.map((filePath) => path.extname(filePath)).sort()).toEqual([
+      '.cmd',
+      '.ps1',
+    ]);
+    expect(await readFile(realBinary, 'utf8')).toBe(originalRealBinary);
+    expect(await readFile(installed.shimPaths[0] ?? '', 'utf8')).toContain('--metadata');
+    expect(await readFile(installed.shimPaths[1] ?? '', 'utf8')).toContain('--metadata');
+  });
 });

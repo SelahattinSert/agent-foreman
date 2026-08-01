@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 
-import {pathToFileURL} from 'node:url';
-
 import {runDispatcherEntry} from './dispatcher-entry.js';
+import {isMainModule} from './entrypoint.js';
 
 const entryPoint = process.argv[1];
-if (entryPoint !== undefined && import.meta.url === pathToFileURL(entryPoint).href) {
+if (isMainModule(import.meta.url, entryPoint)) {
   runDispatcherEntry(process.argv.slice(2)).then(
     (exitCode) => {
       process.exitCode = exitCode;

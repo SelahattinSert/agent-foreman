@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'vitest';
 
-import type {TaskSession, WorkflowEventRecord} from '@agent-foreman/contracts';
+import type {ExecutionWorkspace, TaskSession, WorkflowEventRecord} from '@agent-foreman/contracts';
 
 import {InMemoryWorkflowStore} from '../src/index.js';
 
@@ -56,5 +56,23 @@ describe('InMemoryWorkflowStore', () => {
     await expect(store.commitTransition(stalePrevious, next, event)).rejects.toThrow(/stale/iu);
     await expect(store.getSession(created.id)).resolves.toEqual(created);
     await expect(store.listEvents(created.id)).resolves.toEqual([]);
+  });
+
+  test('uses the authoritative workspace record in a resumed session', async () => {
+    const store = new InMemoryWorkflowStore();
+    const ready: ExecutionWorkspace = {
+      id: created.id,
+      path: '/worktree',
+      mode: 'worktree',
+      status: 'READY',
+      createdAt: at,
+    };
+    await store.createSession({...created, workspace: ready});
+    await store.recordWorkspace(created.id, {...ready, status: 'APPLIED'});
+
+    const snapshot = await store.loadResumeSnapshot(created.id);
+
+    expect(snapshot?.workspace?.status).toBe('APPLIED');
+    expect(snapshot?.session.workspace?.status).toBe('APPLIED');
   });
 });

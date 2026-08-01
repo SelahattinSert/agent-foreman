@@ -14,10 +14,10 @@
     "orchestration",
     "code-review"
   ],
-  "homepage": "https://github.com/agent-foreman/agent-foreman#readme",
+  "homepage": "https://github.com/SelahattinSert/agent-foreman#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/agent-foreman/agent-foreman.git"
+    "url": "git+https://github.com/SelahattinSert/agent-foreman.git"
   },
   "license": "Apache-2.0",
   "type": "module",
@@ -35,18 +35,20 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup --config tsup.config.ts"
+    "build": "tsdown --config tsdown.config.ts && node scripts/copy-skill.mjs"
   },
   "dependencies": {
     "better-sqlite3": "13.0.2",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "commander": "^15.0.0",
     "ink": "^7.1.1",
-    "react": "^19.2.8"
+    "react": "^19.2.8",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/react": "^19.2.14"
   },
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.18.0"
   }
 }

@@ -1,4 +1,6 @@
 import type {
+  ApprovalChallenge,
+  ApprovalPurpose,
   ExecutionWorkspace,
   QualityGateReport,
   ReviewDecision,
@@ -9,6 +11,42 @@ import type {
   WorkflowEventRecord,
   WorkerExecutionResult,
 } from '@agent-foreman/contracts';
+
+export interface ConsumeApprovalChallengeInput {
+  readonly challengeId: string;
+  readonly sessionId: string;
+  readonly purpose: ApprovalPurpose;
+  readonly subjectHash: string;
+  readonly consumedAt: string;
+}
+
+export interface CommitPlanApprovalInput {
+  readonly challenge: ConsumeApprovalChallengeInput;
+  readonly plan: TaskPlan;
+  readonly markdown: string;
+  readonly planHash: string;
+  readonly approval: PlanApprovalRecord;
+  readonly previousSession: TaskSession;
+  readonly nextSession: TaskSession;
+  readonly event: WorkflowEventRecord;
+}
+
+export interface CommitApplyApprovalInput {
+  readonly challenge: ConsumeApprovalChallengeInput;
+  readonly sourceBaseline: string;
+  readonly previousSession: TaskSession;
+  readonly nextSession: TaskSession;
+  readonly event: WorkflowEventRecord;
+}
+
+export interface ApprovalChallengeRepository {
+  createApprovalChallenge(challenge: ApprovalChallenge): Promise<void>;
+  getApprovalChallenge(challengeId: string): Promise<ApprovalChallenge | undefined>;
+  consumeApprovalChallenge(input: ConsumeApprovalChallengeInput): Promise<ApprovalChallenge>;
+  cancelApprovalChallenge(challengeId: string, sessionId: string): Promise<void>;
+  commitPlanApproval(input: CommitPlanApprovalInput): Promise<void>;
+  commitApplyApproval(input: CommitApplyApprovalInput): Promise<void>;
+}
 
 export interface PlanRecord {
   readonly plan: TaskPlan;
@@ -93,6 +131,9 @@ export interface ResumeSnapshot {
   readonly lastWorkerIteration?: WorkerIterationRecord;
   readonly lastReviewDecision?: ReviewDecisionRecord;
   readonly latestQualityGateReport?: QualityGateReport;
+  readonly workerIterations: readonly WorkerIterationRecord[];
+  readonly reviewDecisions: readonly ReviewDecisionRecord[];
+  readonly qualityGateRuns: readonly QualityGateRunRecord[];
   readonly workspace?: ExecutionWorkspace;
 }
 
@@ -108,6 +149,7 @@ export interface PlanRepository {
   getPlan(taskId: string, version: number): Promise<TaskPlan | undefined>;
   getPlanRecord(taskId: string, version: number): Promise<PlanRecord | undefined>;
   savePlanApproval(approval: PlanApprovalRecord): Promise<void>;
+  getPlanApproval(taskId: string, planVersion: number): Promise<PlanApprovalRecord | undefined>;
 }
 
 export interface WorkflowEventRepository {

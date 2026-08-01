@@ -316,6 +316,7 @@ describe('real workflow orchestration', () => {
     expect(await readFile(path.join(root, 'result.txt'), 'utf8')).toBe('final\n');
     const completedSnapshot = await store.loadResumeSnapshot(session.id);
     expect(completedSnapshot?.workspace?.status).toBe('APPLIED');
+    expect(completedSnapshot?.session.workspace?.status).toBe('APPLIED');
     store.close();
   });
 

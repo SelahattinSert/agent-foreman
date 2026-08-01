@@ -89,3 +89,82 @@ describe.runIf(process.platform !== 'win32')('installed POSIX shim', () => {
     });
   });
 });
+
+describe.runIf(process.platform === 'win32')('installed Windows shims', () => {
+  test('preserves arguments, stdin, and exit codes through CMD and PowerShell', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'agent-foreman-windows-shim-e2e-'));
+    const realBinary = await fixture(root, 'codex-real.exe', 'fixture identity only');
+    const dispatcher = await fixture(
+      root,
+      'dispatcher.mjs',
+      [
+        "const fs = await import('node:fs');",
+        "const metadataIndex = process.argv.indexOf('--metadata');",
+        "const separatorIndex = process.argv.indexOf('--');",
+        "const metadata = JSON.parse(fs.readFileSync(process.argv[metadataIndex + 1], 'utf8'));",
+        'const args = process.argv.slice(separatorIndex + 1);',
+        "const input = fs.readFileSync(0, 'utf8');",
+        "if (args[0] === 'agent-foreman') {",
+        '  fs.writeSync(1, JSON.stringify({intercepted: args.slice(1), provider: metadata.providerId}));',
+        '} else {',
+        '  fs.writeSync(1, JSON.stringify({args, input}));',
+        "  if (args[0] === 'fail') process.exitCode = 37;",
+        '}',
+      ].join('\n'),
+    );
+    const installed = await installShim({
+      providerId: 'codex',
+      binaryName: 'codex',
+      realBinaryPath: realBinary,
+      dispatcherEntrypoint: dispatcher,
+      nodeExecutable: process.execPath,
+      dataDirectory: path.join(root, 'data'),
+      platform: 'win32',
+    });
+    const cmdShim = installed.shimPaths.find((filePath) => filePath.endsWith('.cmd'));
+    const powerShellShim = installed.shimPaths.find((filePath) => filePath.endsWith('.ps1'));
+    expect(cmdShim).toBeDefined();
+    expect(powerShellShim).toBeDefined();
+
+    const pass = await runProcess({
+      executable: cmdShim ?? '',
+      args: ['exec', 'argument with spaces'],
+      stdin: 'stdin preserved',
+      stdio: 'capture',
+    });
+    expect(pass.exitCode).toBe(0);
+    expect(JSON.parse(pass.stdout)).toEqual({
+      args: ['exec', 'argument with spaces'],
+      input: 'stdin preserved',
+    });
+
+    const failure = await runProcess({
+      executable: cmdShim ?? '',
+      args: ['fail'],
+      stdin: '',
+      stdio: 'capture',
+    });
+    expect(failure.exitCode).toBe(37);
+
+    const intercepted = await runProcess({
+      executable: 'powershell.exe',
+      args: [
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        powerShellShim ?? '',
+        'agent-foreman',
+        '--plain',
+      ],
+      stdin: '',
+      stdio: 'capture',
+    });
+    expect(intercepted.exitCode).toBe(0);
+    expect(JSON.parse(intercepted.stdout)).toEqual({
+      intercepted: ['--plain'],
+      provider: 'codex',
+    });
+  });
+});

@@ -23,6 +23,7 @@ describe('Agent Foreman CLI', () => {
     const dependencies = {
       frontendProvider: 'codex',
       runReal,
+      runMcp: vi.fn(() => Promise.resolve()),
       runSettings: vi.fn(() => Promise.resolve()),
       resumeTask: vi.fn(async () => undefined),
       write: vi.fn(),
@@ -52,6 +53,7 @@ describe('Agent Foreman CLI', () => {
     const program = createCliProgram({
       frontendProvider: 'standalone',
       runReal,
+      runMcp: vi.fn(() => Promise.resolve()),
       runSettings: vi.fn(() => Promise.resolve()),
       resumeTask: vi.fn(async () => undefined),
       write: (message) => output.push(message),
@@ -71,6 +73,7 @@ describe('Agent Foreman CLI', () => {
     const program = createCliProgram({
       frontendProvider: 'standalone',
       runReal: vi.fn(async () => undefined),
+      runMcp: vi.fn(() => Promise.resolve()),
       runSettings: vi.fn(() => Promise.resolve()),
       resumeTask: vi.fn(async () => undefined),
       write: vi.fn(),
@@ -109,6 +112,7 @@ describe('Agent Foreman CLI', () => {
     const dependencies = {
       frontendProvider: 'standalone',
       runReal,
+      runMcp: vi.fn(() => Promise.resolve()),
       runSettings,
       resumeTask: vi.fn(() => Promise.resolve()),
       write: vi.fn(),
@@ -118,5 +122,22 @@ describe('Agent Foreman CLI', () => {
 
     expect(runSettings).toHaveBeenCalledOnce();
     expect(runReal).not.toHaveBeenCalled();
+  });
+
+  test('runs the headless MCP server only through the explicit mcp serve command', async () => {
+    const runMcp = vi.fn(() => Promise.resolve());
+    const dependencies = {
+      frontendProvider: 'standalone',
+      runReal: vi.fn(() => Promise.resolve()),
+      runMcp,
+      runSettings: vi.fn(() => Promise.resolve()),
+      resumeTask: vi.fn(() => Promise.resolve()),
+      write: vi.fn(),
+    };
+
+    await createCliProgram(dependencies).parseAsync(['mcp', 'serve'], {from: 'user'});
+
+    expect(runMcp).toHaveBeenCalledOnce();
+    expect(dependencies.runReal).not.toHaveBeenCalled();
   });
 });

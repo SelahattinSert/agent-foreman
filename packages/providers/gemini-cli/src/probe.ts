@@ -20,6 +20,9 @@ export const WorkerCliProbeResultSchema = z.strictObject({
   modelDiscovery: z.boolean(),
   effort: z.boolean(),
   printTimeout: z.boolean(),
+  newProject: z.boolean(),
+  disableSlashCommands: z.boolean(),
+  logFile: z.boolean(),
 });
 
 export type WorkerCliProbeResult = z.infer<typeof WorkerCliProbeResultSchema>;
@@ -71,6 +74,9 @@ export const probeWorkerCli = async (input: ProbeWorkerCliInput): Promise<Worker
     modelDiscovery: modelsHelp.exitCode === 0,
     effort: output.includes('--effort'),
     printTimeout: output.includes('--print-timeout'),
+    newProject: output.includes('--new-project'),
+    disableSlashCommands: output.includes('--disable-slash-commands'),
+    logFile: output.includes('--log-file'),
   });
   if (input.cachePath !== undefined) {
     await mkdir(path.dirname(input.cachePath), {recursive: true, mode: 0o700});

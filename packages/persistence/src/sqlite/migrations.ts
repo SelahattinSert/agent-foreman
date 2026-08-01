@@ -139,6 +139,52 @@ const migrations: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 2,
+    sql: `
+      CREATE TABLE approval_challenges (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        purpose TEXT NOT NULL CHECK (purpose IN ('PLAN', 'APPLY')),
+        subject_hash TEXT NOT NULL,
+        plan_version INTEGER,
+        source_baseline TEXT,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('PENDING', 'CONSUMED', 'EXPIRED', 'CANCELLED')),
+        consumed_at TEXT,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+      );
+      CREATE INDEX approval_challenges_session_purpose
+        ON approval_challenges(session_id, purpose, created_at);
+      CREATE UNIQUE INDEX approval_challenges_one_pending
+        ON approval_challenges(session_id, purpose) WHERE status = 'PENDING';
+    `,
+  },
+  {
+    version: 3,
+    sql: `
+      UPDATE provider_executions
+      SET status = 'FAILED',
+          completed_at = COALESCE(
+            (SELECT sessions.updated_at FROM sessions WHERE sessions.id = provider_executions.session_id),
+            started_at
+          ),
+          error_code = 'AF_PERSISTENCE_STARTUP'
+      WHERE role = 'worker'
+        AND status = 'STARTED'
+        AND EXISTS (
+          SELECT 1 FROM sessions
+          WHERE sessions.id = provider_executions.session_id
+            AND sessions.state = 'PAUSED'
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM worker_iterations
+          WHERE worker_iterations.session_id = provider_executions.session_id
+            AND worker_iterations.started_at = provider_executions.started_at
+        );
+    `,
+  },
 ];
 
 export const runMigrations = (database: Database.Database): void => {

@@ -18,3 +18,5 @@ Agent Foreman crosses trust boundaries between a user, repository, local executa
 | Arbitrary plugins                                    | No in-process marketplace loading in MVP; future plugins require declared capabilities, identity, trust, and isolation policy      |
 
 Supervisors cannot edit files by default. Workers cannot access outside their execution workspace by default. Technical approval and apply approval remain separate user decisions.
+
+Antigravity's portable default additionally denies all worker terminal, URL and MCP actions and permits only its workspace-scoped file tools. The provider runs with a private per-invocation home and a new project bound to the managed worktree. Deterministic quality commands are executed separately by Agent Foreman's argument-array subprocess runner. Enabling the provider's terminal sandbox is explicit and fail-closed; a sandbox initialization failure is never converted into an unsandboxed command grant.

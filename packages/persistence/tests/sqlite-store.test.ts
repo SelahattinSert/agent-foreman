@@ -2,6 +2,7 @@ import {mkdtemp, readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 
+import Database from 'better-sqlite3';
 import {describe, expect, test} from 'vitest';
 
 import type {
@@ -94,6 +95,26 @@ const gateReport: QualityGateReport = {
 };
 
 describe('SqliteWorkflowStore', () => {
+  test('uses the authoritative workspace record in a resumed session', async () => {
+    const store = await SqliteWorkflowStore.open({databasePath: ':memory:'});
+    const initial = session();
+    const ready = {
+      id: initial.id,
+      path: '/tmp/worktree',
+      mode: 'worktree' as const,
+      status: 'READY' as const,
+      createdAt,
+    };
+    await store.createSession({...initial, workspace: ready});
+    await store.recordWorkspace(initial.id, {...ready, status: 'APPLIED'});
+
+    const snapshot = await store.loadResumeSnapshot(initial.id);
+
+    expect(snapshot?.workspace?.status).toBe('APPLIED');
+    expect(snapshot?.session.workspace?.status).toBe('APPLIED');
+    store.close();
+  });
+
   test('migrates all runtime tables and recovers a complete resumable snapshot', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'agent-foreman-sqlite-'));
     const databasePath = path.join(root, 'state.sqlite3');
@@ -217,5 +238,40 @@ describe('SqliteWorkflowStore', () => {
     await expect(store.commitTransition(stale, next, event)).rejects.toThrow(/stale/iu);
     await expect(store.listEvents(initial.id)).resolves.toHaveLength(0);
     store.close();
+  });
+
+  test('reconciles a paused provider start left orphaned by the pre-worker persistence failure', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'agent-foreman-sqlite-reconcile-'));
+    const databasePath = path.join(root, 'state.sqlite3');
+    const store = await SqliteWorkflowStore.open({databasePath});
+    const paused: TaskSession = {
+      ...session(),
+      state: 'PAUSED',
+      iteration: 1,
+      statusMessage: 'Worker attempt persistence failed.',
+    };
+    await store.createSession(paused);
+    await store.recordProviderExecution({
+      id: 'provider-orphaned-start',
+      sessionId: paused.id,
+      role: 'worker',
+      providerId: 'antigravity-cli',
+      status: 'STARTED',
+      startedAt: updatedAt,
+    });
+    store.close();
+
+    const database = new Database(databasePath);
+    database.prepare('DELETE FROM schema_migrations WHERE version = 3').run();
+    database.close();
+
+    const reopened = await SqliteWorkflowStore.open({databasePath});
+    const snapshot = await reopened.loadResumeSnapshot(paused.id);
+    expect(snapshot?.lastProviderExecution).toMatchObject({
+      id: 'provider-orphaned-start',
+      status: 'FAILED',
+      errorCode: 'AF_PERSISTENCE_STARTUP',
+    });
+    reopened.close();
   });
 });

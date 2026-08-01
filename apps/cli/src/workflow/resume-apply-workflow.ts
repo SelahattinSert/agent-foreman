@@ -65,7 +65,7 @@ export const resumeApplyWorkflow = async (
       const applied = await options.applyChanges(workspace);
       workspace = applied.workspace;
       await options.store.recordWorkspace(current.id, workspace);
-      await commit({type: 'CHANGES_APPLIED'});
+      await commit({type: 'CHANGES_APPLIED', workspace});
       return current;
     }
   } else if (current.state === 'TECHNICALLY_APPROVED') {
@@ -74,7 +74,7 @@ export const resumeApplyWorkflow = async (
     const applied = await options.applyChanges(workspace);
     workspace = applied.workspace;
     await options.store.recordWorkspace(current.id, workspace);
-    await commit({type: 'CHANGES_APPLIED'});
+    await commit({type: 'CHANGES_APPLIED', workspace});
     return current;
   } else if (current.state !== 'AWAITING_APPLY_APPROVAL') {
     throw new ConfigurationError(
@@ -110,6 +110,6 @@ export const resumeApplyWorkflow = async (
   const applied = await options.applyChanges(workspace);
   workspace = applied.workspace;
   await options.store.recordWorkspace(current.id, workspace);
-  await commit({type: 'CHANGES_APPLIED'});
+  await commit({type: 'CHANGES_APPLIED', workspace});
   return current;
 };

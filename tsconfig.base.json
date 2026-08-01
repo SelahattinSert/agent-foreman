@@ -36,6 +36,7 @@
       "@agent-foreman/provider-codex-cli": ["./packages/providers/codex-cli/src/index.ts"],
       "@agent-foreman/provider-gemini-cli": ["./packages/providers/gemini-cli/src/index.ts"],
       "@agent-foreman/quality-gates": ["./packages/quality-gates/src/index.ts"],
+      "@agent-foreman/runtime": ["./packages/runtime/src/index.ts"],
       "@agent-foreman/workspace": ["./packages/workspace/src/index.ts"]
     },
     "types": ["node", "vitest/globals"]

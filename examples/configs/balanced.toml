@@ -35,7 +35,7 @@ ignore_user_config = true
 
 [providers.antigravity-cli]
 binary = "agy"
-sandbox = true
+sandbox = false
 
 [quality]
 require_supervisor_approval = true

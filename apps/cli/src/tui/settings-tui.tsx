@@ -23,9 +23,34 @@ export interface SettingsViewProps {
   readonly configPath?: string;
 }
 
-const SETTINGS_TOTAL_STEPS = 8;
-
-const settingsStepNumber = (step: SettingsSnapshot['step']): number => {
+const settingsStepNumber = (snapshot: SettingsSnapshot): number => {
+  const {step} = snapshot;
+  if (snapshot.nativeSupervisor) {
+    switch (step) {
+      case 'loading':
+      case 'profile-choice':
+      case 'profile-name':
+        return 1;
+      case 'worker-provider':
+        return 2;
+      case 'worker-model-choice':
+      case 'worker-model':
+        return 3;
+      case 'validation':
+      case 'warning-confirmation':
+        return 4;
+      case 'review':
+      case 'saving':
+      case 'completed':
+      case 'cancelled':
+        return 5;
+      case 'supervisor-provider':
+      case 'supervisor-model-choice':
+      case 'supervisor-model':
+      case 'reasoning-effort':
+        return 2;
+    }
+  }
   switch (step) {
     case 'loading':
     case 'profile-choice':
@@ -33,6 +58,7 @@ const settingsStepNumber = (step: SettingsSnapshot['step']): number => {
       return 1;
     case 'supervisor-provider':
       return 2;
+    case 'supervisor-model-choice':
     case 'supervisor-model':
       return 3;
     case 'reasoning-effort':
@@ -100,16 +126,19 @@ const providerSummary = (snapshot: SettingsSnapshot): React.ReactElement => (
   <Box flexDirection="column" marginTop={1} aria-label="Candidate global profile">
     <Text>Global profile: {snapshot.draft.profileName ?? 'not selected'}</Text>
     <Text>
-      Supervisor: {snapshot.draft.supervisorProvider ?? 'not selected'} /{' '}
-      {snapshot.draft.supervisorModel ?? 'model not set'}
-      {snapshot.draft.reasoningEffort === undefined ? '' : ` / ${snapshot.draft.reasoningEffort}`}
+      Supervisor:{' '}
+      {snapshot.nativeSupervisor
+        ? 'current native Codex session'
+        : `${snapshot.draft.supervisorProvider ?? 'not selected'} / ${snapshot.draft.supervisorModel ?? 'model not set'}${snapshot.draft.reasoningEffort === undefined ? '' : ` / ${snapshot.draft.reasoningEffort}`}`}
     </Text>
-    <Text>
-      Supervisor binary:{' '}
-      {snapshot.draft.supervisorProvider === undefined
-        ? 'not selected'
-        : (snapshot.providerBinaries[snapshot.draft.supervisorProvider] ?? 'not configured')}
-    </Text>
+    {snapshot.nativeSupervisor ? null : (
+      <Text>
+        Supervisor binary:{' '}
+        {snapshot.draft.supervisorProvider === undefined
+          ? 'not selected'
+          : (snapshot.providerBinaries[snapshot.draft.supervisorProvider] ?? 'not configured')}
+      </Text>
+    )}
     <Text>
       Worker: {snapshot.draft.workerProvider ?? 'not selected'} /{' '}
       {snapshot.draft.workerModel ?? 'model not set'}
@@ -138,24 +167,47 @@ export const SettingsView = ({
   });
   const accent = noColor ? undefined : 'cyan';
   const field = textField(snapshot);
+  const footer = snapshot.busy
+    ? 'Please wait · Esc cancel'
+    : field === undefined
+      ? snapshot.choices.length > 0
+        ? '↑/↓ move · Enter select · Esc cancel'
+        : 'Enter continue · Esc cancel'
+      : 'Type to edit · Enter continue · Backspace delete · Esc cancel';
   return (
     <Box flexDirection="column" paddingX={1} aria-label="Agent Foreman global profile settings">
       <Text bold {...(accent === undefined ? {} : {color: accent})}>
         Agent Foreman Settings
       </Text>
       <Text>
-        Step {settingsStepNumber(snapshot.step)}/{SETTINGS_TOTAL_STEPS}: {snapshot.title}
+        Step {settingsStepNumber(snapshot)}/{snapshot.nativeSupervisor ? 5 : 8}: {snapshot.title}
         {snapshot.busy ? ' · working' : ''}
       </Text>
       {configPath === undefined ? null : <Text dimColor>Global config: {configPath}</Text>}
       {providerSummary(snapshot)}
       {snapshot.choices.length === 0 ? null : (
-        <Box flexDirection="column" marginTop={1} aria-label="Available settings actions">
+        <Box
+          flexDirection="column"
+          marginTop={1}
+          paddingX={1}
+          borderStyle="round"
+          {...(accent === undefined ? {} : {borderColor: accent})}
+          aria-label="Available settings actions"
+        >
+          <Text bold>Choose an option</Text>
           {snapshot.choices.map((choice, index) => (
-            <Text key={choice.id}>
-              {index === snapshot.selectedIndex ? '>' : ' '} {choice.label}
+            <Text
+              key={choice.id}
+              {...(index === snapshot.selectedIndex
+                ? {bold: true, inverse: true, ...(accent === undefined ? {} : {color: accent})}
+                : {})}
+            >
+              {index === snapshot.selectedIndex ? '❯' : ' '} {choice.label}
             </Text>
           ))}
+          <Text dimColor>
+            Selected {snapshot.selectedIndex + 1} of {snapshot.choices.length}
+          </Text>
         </Box>
       )}
       {field === undefined ? null : (
@@ -181,7 +233,7 @@ export const SettingsView = ({
       {snapshot.error === undefined ? null : (
         <Text {...(noColor ? {} : {color: 'red'})}>Error: {snapshot.error}</Text>
       )}
-      <Text dimColor>↑/↓ select · Enter continue · Backspace edit · Esc cancel</Text>
+      <Text dimColor>{footer}</Text>
     </Box>
   );
 };

@@ -44,6 +44,9 @@ export interface CliWorkerProviderOptions {
   readonly sandbox?: boolean;
   readonly extraArgs?: readonly string[];
   readonly argsTemplate?: readonly string[];
+  readonly isolatedAntigravitySettings?: boolean;
+  readonly newProject?: boolean;
+  readonly disableSlashCommands?: boolean;
   readonly transport?: WorkerCliTransport;
   readonly probe?: () => Promise<WorkerCliProbeResult>;
 }
@@ -63,6 +66,13 @@ export class CliWorkerProvider implements WorkerProvider {
         ...(options.sandbox === undefined ? {} : {sandbox: options.sandbox}),
         ...(options.extraArgs === undefined ? {} : {extraArgs: options.extraArgs}),
         ...(options.argsTemplate === undefined ? {} : {argsTemplate: options.argsTemplate}),
+        ...(options.isolatedAntigravitySettings === undefined
+          ? {}
+          : {isolatedAntigravitySettings: options.isolatedAntigravitySettings}),
+        ...(options.newProject === undefined ? {} : {newProject: options.newProject}),
+        ...(options.disableSlashCommands === undefined
+          ? {}
+          : {disableSlashCommands: options.disableSlashCommands}),
       });
   }
 
@@ -80,11 +90,13 @@ export class CliWorkerProvider implements WorkerProvider {
           probe.printMode &&
           probe.jsonOutput &&
           probe.jsonSchema &&
+          (this.options.newProject !== true || probe.newProject) &&
+          (this.options.disableSlashCommands !== true || probe.disableSlashCommands) &&
           (probe.workspaceMode || this.options.argsTemplate !== undefined),
         structuredOutput: probe.jsonSchema,
         sessionResume: probe.sessionResume,
         filesystemTools: true,
-        shellTools: true,
+        shellTools: this.options.sandbox !== false,
         streaming: false,
         tokenUsageReporting: false,
         modelDiscovery: probe.modelDiscovery,
@@ -119,7 +131,10 @@ export class CliWorkerProvider implements WorkerProvider {
       }
       return {
         status: 'PASS',
-        message: `${this.options.displayName} ${descriptor.version ?? ''} supports headless structured execution.`,
+        message:
+          this.options.sandbox === false
+            ? `${this.options.displayName} ${descriptor.version ?? ''} supports headless structured execution in worktree file-tools-only mode; terminal commands are disabled and quality gates run in Agent Foreman.`
+            : `${this.options.displayName} ${descriptor.version ?? ''} supports headless structured execution with terminal sandboxing.`,
       };
     } catch (error: unknown) {
       return {
@@ -262,6 +277,16 @@ export class CliWorkerProvider implements WorkerProvider {
       taskId,
       planHash,
       expectedSchemaName: 'WorkerExecutionResult@1',
+      ...(this.options.sandbox === false
+        ? {
+            additionalConstraints: [
+              'The run_command/terminal tool is disabled for this provider execution; never invoke it.',
+              'Inspect the workspace only with built-in directory/search/read file tools, and edit only with built-in write_to_file or replace_file_content tools.',
+              'Do not attempt to run tests, builds, Git, package managers, or other shell commands; Agent Foreman runs deterministic quality gates after you return.',
+              'Report commandsRun as an empty array and report code changes from the files you actually edited.',
+            ],
+          }
+        : {}),
       payload,
     });
     context.emit({
@@ -341,6 +366,14 @@ export class GeminiCliWorkerProvider extends CliWorkerProvider {
 
 export class AntigravityCliWorkerProvider extends CliWorkerProvider {
   public constructor(options: Omit<CliWorkerProviderOptions, 'id' | 'displayName'> = {}) {
-    super({id: 'antigravity-cli', displayName: 'Antigravity CLI', ...options});
+    super({
+      id: 'antigravity-cli',
+      displayName: 'Antigravity CLI',
+      ...options,
+      sandbox: options.sandbox ?? false,
+      isolatedAntigravitySettings: true,
+      newProject: true,
+      disableSlashCommands: true,
+    });
   }
 }

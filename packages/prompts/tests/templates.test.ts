@@ -31,4 +31,21 @@ describe('versioned prompt templates', () => {
     expect(prompt).toContain('untrusted');
     expect(prompt).toContain('Do not edit files');
   });
+
+  test('includes provider-enforced constraints in the signed protocol instructions', () => {
+    const prompt = renderPrompt({
+      templateId: 'worker-initial-execution-v1',
+      taskId: 'task-001',
+      planHash: 'a'.repeat(64),
+      expectedSchemaName: 'WorkerExecutionResult@1',
+      additionalConstraints: [
+        'Terminal commands are disabled; edit with workspace file tools only.',
+      ],
+      payload: {},
+    });
+
+    expect(prompt).toContain(
+      '- Terminal commands are disabled; edit with workspace file tools only.',
+    );
+  });
 });

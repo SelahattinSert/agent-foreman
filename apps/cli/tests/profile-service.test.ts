@@ -9,6 +9,7 @@ import type {ModelDescriptor, ProviderDescriptor, ProviderHealth} from '@agent-f
 
 import {GlobalProfileService, type SettingsDraft} from '../src/settings/profile-service.js';
 import {
+  discoverSettingsSupervisorModels,
   discoverSettingsWorkerModels,
   validateSettingsDraft,
   type SettingsValidationAdapter,
@@ -24,6 +25,29 @@ const draft = (profileName = 'daily'): SettingsDraft => ({
 });
 
 describe('GlobalProfileService', () => {
+  test('stores a native-Codex profile without inventing a supervisor model', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'af-native-profile-'));
+    const configPath = path.join(directory, 'config.toml');
+    const service = new GlobalProfileService({configPath});
+
+    await service.save({
+      profileName: 'native',
+      supervisorProvider: 'codex-cli',
+      workerProvider: 'gemini-cli',
+      workerModel: 'worker-model',
+    });
+
+    await expect(loadConfigDocument(configPath, true)).resolves.toMatchObject({
+      activeProfile: 'native',
+      profiles: {
+        native: {
+          supervisor: {provider: 'codex-cli'},
+          worker: {provider: 'gemini-cli', model: 'worker-model'},
+        },
+      },
+    });
+  });
+
   test('preserves unrelated global settings and activates the explicitly saved profile', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'af-profile-service-'));
     const configPath = path.join(directory, 'config.toml');
@@ -124,6 +148,45 @@ const validationAdapter = (input: {
 };
 
 describe('validateSettingsDraft', () => {
+  test('validates only the worker when native Codex owns supervision', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'af-native-validation-'));
+    const service = new GlobalProfileService({
+      configPath: path.join(directory, 'config.toml'),
+    });
+    const createSupervisor = vi.fn(() =>
+      validationAdapter({
+        descriptor: descriptor('codex-cli', 'supervisor', false),
+        health: {status: 'FAIL', message: 'Must not run.'},
+      }),
+    );
+    const worker = validationAdapter({
+      descriptor: descriptor('gemini-cli', 'worker', true),
+      health: {status: 'PASS', message: 'Gemini is ready.'},
+      models: [{id: 'worker-model', available: true}],
+    });
+
+    const result = await validateSettingsDraft(
+      {
+        profileName: 'native',
+        nativeSupervisor: true,
+        supervisorProvider: 'codex-cli',
+        workerProvider: 'gemini-cli',
+        workerModel: 'worker-model',
+      },
+      {
+        service,
+        cacheDirectory: path.join(directory, 'cache'),
+        createSupervisor,
+        createWorker: () => worker,
+      },
+    );
+
+    expect(result.status).toBe('PASS');
+    expect(result.checks[0]).toMatchObject({role: 'supervisor', status: 'PASS'});
+    expect(createSupervisor).not.toHaveBeenCalled();
+    expect(worker.healthCheck).toHaveBeenCalledOnce();
+  });
+
   test('validates the unsaved candidate and reports Codex model uncertainty as a warning', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'af-profile-validation-'));
     const configPath = path.join(directory, 'config.toml');
@@ -190,6 +253,61 @@ describe('validateSettingsDraft', () => {
         }),
       ]),
     );
+    await expect(loadConfigDocument(configPath)).resolves.toBeUndefined();
+  });
+
+  test('validates the exact configured supervisor model against Codex discovery', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'af-supervisor-validation-'));
+    const service = new GlobalProfileService({configPath: path.join(directory, 'config.toml')});
+    const supervisor = validationAdapter({
+      descriptor: descriptor('codex-cli', 'supervisor', true),
+      health: {status: 'PASS', message: 'Codex is ready.'},
+      models: [{id: 'supervisor-model', displayName: 'Supervisor model', available: true}],
+    });
+    const worker = validationAdapter({
+      descriptor: descriptor('gemini-cli', 'worker', true),
+      health: {status: 'PASS', message: 'Gemini is ready.'},
+      models: [{id: 'worker-model', available: true}],
+    });
+
+    const result = await validateSettingsDraft(draft(), {
+      service,
+      cacheDirectory: path.join(directory, 'cache'),
+      createSupervisor: () => supervisor,
+      createWorker: () => worker,
+    });
+
+    expect(result.status).toBe('PASS');
+    expect(result.checks).toEqual([
+      {role: 'supervisor', status: 'PASS', message: 'Codex is ready.'},
+      {role: 'worker', status: 'PASS', message: 'Gemini is ready.'},
+    ]);
+    expect(supervisor.discoverModels).toHaveBeenCalledOnce();
+  });
+
+  test('discovers supervisor models without persisting the candidate profile', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'af-supervisor-discovery-'));
+    const configPath = path.join(directory, 'config.toml');
+    const service = new GlobalProfileService({configPath});
+    const supervisor = validationAdapter({
+      descriptor: descriptor('codex-cli', 'supervisor', true),
+      health: {status: 'PASS', message: 'Health is intentionally not called.'},
+      models: [{id: 'gpt-visible', displayName: 'GPT Visible', available: true}],
+    });
+
+    const models = await discoverSettingsSupervisorModels(
+      'codex-cli',
+      {profileName: 'daily', supervisorProvider: 'codex-cli'},
+      {
+        service,
+        cacheDirectory: path.join(directory, 'cache'),
+        createSupervisor: () => supervisor,
+      },
+    );
+
+    expect(models).toEqual([{id: 'gpt-visible', displayName: 'GPT Visible', available: true}]);
+    expect(supervisor.healthCheck).not.toHaveBeenCalled();
+    expect(supervisor.dispose).toHaveBeenCalledOnce();
     await expect(loadConfigDocument(configPath)).resolves.toBeUndefined();
   });
 

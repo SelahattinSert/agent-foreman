@@ -13,6 +13,7 @@ export type SettingsStep =
   | 'profile-choice'
   | 'profile-name'
   | 'supervisor-provider'
+  | 'supervisor-model-choice'
   | 'supervisor-model'
   | 'reasoning-effort'
   | 'worker-provider'
@@ -31,6 +32,7 @@ export interface SettingsChoice {
 }
 
 export interface SettingsSnapshot {
+  readonly nativeSupervisor: boolean;
   readonly step: SettingsStep;
   readonly title: string;
   readonly choices: readonly SettingsChoice[];
@@ -50,7 +52,12 @@ export type SettingsWizardResult =
 export interface SettingsControllerDependencies {
   readonly service: Pick<GlobalProfileService, 'load' | 'save'>;
   readonly initialProfile?: string;
+  readonly nativeSupervisor?: boolean;
   readonly validate: (draft: SettingsDraft) => Promise<SettingsValidation>;
+  readonly discoverSupervisorModels: (
+    providerId: string,
+    draft: Readonly<Partial<SettingsDraft>>,
+  ) => Promise<readonly ModelDescriptor[]>;
   readonly discoverWorkerModels: (
     providerId: string,
     draft: Readonly<Partial<SettingsDraft>>,
@@ -62,6 +69,7 @@ type SettingsSnapshotChanges = {
 };
 
 const initialSnapshot: SettingsSnapshot = {
+  nativeSupervisor: false,
   step: 'loading',
   title: 'Loading global profiles',
   choices: [],
@@ -93,13 +101,17 @@ const withoutWorkerModel = (
 };
 
 export class SettingsController {
-  private snapshot: SettingsSnapshot = initialSnapshot;
+  private snapshot: SettingsSnapshot;
   private readonly listeners = new Set<() => void>();
   private profiles: Readonly<Record<string, Profile>> = {};
   private resultResolve: ((result: SettingsWizardResult) => void) | undefined;
   private readonly result: Promise<SettingsWizardResult>;
 
   public constructor(private readonly dependencies: SettingsControllerDependencies) {
+    this.snapshot = {
+      ...initialSnapshot,
+      nativeSupervisor: dependencies.nativeSupervisor === true,
+    };
     this.result = new Promise<SettingsWizardResult>((resolve) => {
       this.resultResolve = resolve;
     });
@@ -200,7 +212,10 @@ export class SettingsController {
         this.submitProfileName();
         return;
       case 'supervisor-provider':
-        this.submitSupervisorProvider();
+        await this.submitSupervisorProvider();
+        return;
+      case 'supervisor-model-choice':
+        this.submitSupervisorModelChoice();
         return;
       case 'supervisor-model':
         this.submitSupervisorModel();
@@ -258,7 +273,7 @@ export class SettingsController {
       this.update({error: 'Select an existing profile or create a new one.'});
       return;
     }
-    this.showSupervisorProviders({
+    this.showProviderSelection({
       profileName: name,
       supervisorProvider: profile.supervisor.provider,
       ...(profile.supervisor.model === undefined
@@ -285,10 +300,21 @@ export class SettingsController {
   private submitProfileName(): void {
     try {
       const profileName = normalizeProfileName(this.snapshot.input);
-      this.showSupervisorProviders({profileName});
+      this.showProviderSelection({profileName, supervisorProvider: 'codex-cli'});
     } catch (error: unknown) {
       this.update({error: errorMessage(error)});
     }
+  }
+
+  private showProviderSelection(draft: Readonly<Partial<SettingsDraft>>): void {
+    if (this.snapshot.nativeSupervisor) {
+      this.showWorkerProviders({
+        ...draft,
+        supervisorProvider: draft.supervisorProvider ?? 'codex-cli',
+      });
+      return;
+    }
+    this.showSupervisorProviders(draft);
   }
 
   private showSupervisorProviders(draft: Readonly<Partial<SettingsDraft>>): void {
@@ -310,21 +336,66 @@ export class SettingsController {
     });
   }
 
-  private submitSupervisorProvider(): void {
+  private async submitSupervisorProvider(): Promise<void> {
     const provider = this.selectedChoice()?.id;
     if (provider === undefined) return;
     const sameProvider = provider === this.snapshot.draft.supervisorProvider;
     const draft = sameProvider
       ? {...this.snapshot.draft, supervisorProvider: provider}
       : {...withoutSupervisorModel(this.snapshot.draft), supervisorProvider: provider};
+    this.update({busy: true, title: 'Discovering supervisor models', draft});
+    try {
+      const models = (await this.dependencies.discoverSupervisorModels(provider, draft)).filter(
+        ({available}) => available,
+      );
+      if (models.length === 0) {
+        this.showManualSupervisorModel(draft);
+        return;
+      }
+      const choices: SettingsChoice[] = [
+        ...models.map(({id, displayName}) => ({id: `model:${id}`, label: displayName ?? id})),
+        {id: 'manual-model', label: 'Enter model manually'},
+      ];
+      const selectedModel = draft.supervisorModel;
+      const discoveredSelection =
+        selectedModel === undefined
+          ? 0
+          : choices.findIndex(({id}) => id === `model:${selectedModel}`);
+      this.update({
+        step: 'supervisor-model-choice',
+        title: 'Select the exact supervisor model',
+        choices,
+        selectedIndex: discoveredSelection < 0 ? choices.length - 1 : discoveredSelection,
+        input: '',
+        busy: false,
+        draft,
+      });
+    } catch (error: unknown) {
+      this.showManualSupervisorModel(draft, `Model discovery failed: ${errorMessage(error)}`);
+    }
+  }
+
+  private showManualSupervisorModel(draft: Readonly<Partial<SettingsDraft>>, error?: string): void {
     this.update({
       step: 'supervisor-model',
       title: 'Enter the exact supervisor model',
       choices: [],
       selectedIndex: 0,
-      input: sameProvider ? (this.snapshot.draft.supervisorModel ?? '') : '',
+      input: draft.supervisorModel ?? '',
+      busy: false,
       draft,
+      ...(error === undefined ? {} : {error}),
     });
+  }
+
+  private submitSupervisorModelChoice(): void {
+    const choice = this.selectedChoice()?.id;
+    if (choice === 'manual-model') {
+      this.showManualSupervisorModel(this.snapshot.draft);
+      return;
+    }
+    if (choice?.startsWith('model:') !== true) return;
+    this.showReasoningEfforts({...this.snapshot.draft, supervisorModel: choice.slice(6)});
   }
 
   private submitSupervisorModel(): void {
@@ -333,6 +404,10 @@ export class SettingsController {
       this.update({error: 'Enter the exact supervisor model; no fallback will be selected.'});
       return;
     }
+    this.showReasoningEfforts({...this.snapshot.draft, supervisorModel: model});
+  }
+
+  private showReasoningEfforts(draft: Readonly<Partial<SettingsDraft>>): void {
     const choices = SETTINGS_PROVIDER_CATALOG.supervisor[0].reasoningEfforts.map((effort) => ({
       id: effort,
       label: effort,
@@ -341,15 +416,19 @@ export class SettingsController {
       step: 'reasoning-effort',
       title: 'Select Codex reasoning effort',
       choices,
-      selectedIndex: this.choiceIndex(choices, this.snapshot.draft.reasoningEffort ?? 'high'),
+      selectedIndex: this.choiceIndex(choices, draft.reasoningEffort ?? 'high'),
       input: '',
-      draft: {...this.snapshot.draft, supervisorModel: model},
+      draft,
     });
   }
 
   private submitReasoningEffort(): void {
     const reasoningEffort = this.selectedChoice()?.id;
     if (reasoningEffort === undefined) return;
+    this.showWorkerProviders({...this.snapshot.draft, reasoningEffort});
+  }
+
+  private showWorkerProviders(draft: Readonly<Partial<SettingsDraft>>): void {
     const choices = SETTINGS_PROVIDER_CATALOG.worker.map(({id, displayName, defaultBinary}) => ({
       id,
       label: `${displayName} (${this.snapshot.providerBinaries[id] ?? defaultBinary})`,
@@ -358,9 +437,9 @@ export class SettingsController {
       step: 'worker-provider',
       title: 'Select the worker provider',
       choices,
-      selectedIndex: this.choiceIndex(choices, this.snapshot.draft.workerProvider),
+      selectedIndex: this.choiceIndex(choices, draft.workerProvider),
       input: '',
-      draft: {...this.snapshot.draft, reasoningEffort},
+      draft,
     });
   }
 
@@ -503,7 +582,7 @@ export class SettingsController {
     if (result === undefined) return;
     if (result.status === 'FAIL') {
       if (choice === 'retry') await this.runValidation(this.snapshot.draft);
-      if (choice === 'edit') this.showSupervisorProviders(this.snapshot.draft);
+      if (choice === 'edit') this.showProviderSelection(this.snapshot.draft);
       return;
     }
     if (choice !== 'continue') return;
@@ -549,7 +628,7 @@ export class SettingsController {
 
   private async submitReview(): Promise<void> {
     if (this.selectedChoice()?.id === 'back') {
-      this.showSupervisorProviders(this.snapshot.draft);
+      this.showProviderSelection(this.snapshot.draft);
       return;
     }
     if (this.selectedChoice()?.id !== 'save' || !this.snapshot.saveEligible) return;
@@ -594,19 +673,24 @@ export class SettingsController {
     if (
       supervisorProvider === undefined ||
       supervisorProvider === '' ||
-      supervisorModel === undefined ||
-      supervisorModel === '' ||
+      (!this.snapshot.nativeSupervisor &&
+        (supervisorModel === undefined || supervisorModel === '')) ||
       workerProvider === undefined ||
       workerProvider === '' ||
       workerModel === undefined ||
       workerModel === ''
     ) {
-      throw new Error('The profile is incomplete; providers and exact models are required.');
+      throw new Error(
+        this.snapshot.nativeSupervisor
+          ? 'The profile is incomplete; an exact worker provider and model are required.'
+          : 'The profile is incomplete; providers and exact models are required.',
+      );
     }
     return {
       profileName,
+      ...(this.snapshot.nativeSupervisor ? {nativeSupervisor: true} : {}),
       supervisorProvider,
-      supervisorModel,
+      ...(supervisorModel === undefined || supervisorModel === '' ? {} : {supervisorModel}),
       ...(draft.reasoningEffort === undefined ? {} : {reasoningEffort: draft.reasoningEffort}),
       workerProvider,
       workerModel,

@@ -34,4 +34,16 @@ describe('getAgentForemanPlatformPaths', () => {
     expect(paths.dataDirectory).toContain('Local');
     expect(paths.stateDirectory).toContain('Local');
   });
+
+  test('uses macOS Application Support for all managed data', () => {
+    const paths = getAgentForemanPlatformPaths({
+      platform: 'darwin',
+      environment: {HOME: '/Users/foreman'},
+    });
+    expect(paths).toEqual({
+      configDirectory: '/Users/foreman/Library/Application Support/Agent Foreman',
+      dataDirectory: '/Users/foreman/Library/Application Support/Agent Foreman',
+      stateDirectory: '/Users/foreman/Library/Application Support/Agent Foreman',
+    });
+  });
 });
