@@ -74,10 +74,35 @@ const key = (overrides: Partial<Key>): Key => ({
 });
 
 describe('SettingsView', () => {
+  test('shows numeric progress and a visible cursor for an empty text field', () => {
+    const {validation: _validation, ...snapshotWithoutValidation} = snapshot;
+    const profileNameSnapshot: SettingsSnapshot = {
+      ...snapshotWithoutValidation,
+      step: 'profile-name',
+      title: 'Name the global profile',
+      choices: [],
+      selectedIndex: 0,
+      input: '',
+      draft: {},
+      saveEligible: false,
+    };
+    const frame = renderToString(
+      <SettingsView
+        controller={controller({getSnapshot: () => profileNameSnapshot})}
+        noColor={true}
+      />,
+    );
+
+    expect(frame).toContain('Step 1/8');
+    expect(frame).toContain('Profile name: ▌');
+    expect(frame).toContain('Type a profile name, then press Enter');
+  });
+
   test('renders profile, providers, models, validation, and save authority as text', () => {
     const frame = renderToString(<SettingsView controller={controller()} noColor={true} />);
 
     expect(frame).toContain('Agent Foreman Settings');
+    expect(frame).toContain('Step 8/8');
     expect(frame).toContain('Global profile: daily');
     expect(frame).toContain('Supervisor: codex-cli / supervisor-model / high');
     expect(frame).toContain('Supervisor binary: /usr/local/bin/codex');

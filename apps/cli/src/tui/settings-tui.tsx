@@ -23,6 +23,51 @@ export interface SettingsViewProps {
   readonly configPath?: string;
 }
 
+const SETTINGS_TOTAL_STEPS = 8;
+
+const settingsStepNumber = (step: SettingsSnapshot['step']): number => {
+  switch (step) {
+    case 'loading':
+    case 'profile-choice':
+    case 'profile-name':
+      return 1;
+    case 'supervisor-provider':
+      return 2;
+    case 'supervisor-model':
+      return 3;
+    case 'reasoning-effort':
+      return 4;
+    case 'worker-provider':
+      return 5;
+    case 'worker-model-choice':
+    case 'worker-model':
+      return 6;
+    case 'validation':
+    case 'warning-confirmation':
+      return 7;
+    case 'review':
+    case 'saving':
+    case 'completed':
+    case 'cancelled':
+      return 8;
+  }
+};
+
+const textField = (
+  snapshot: SettingsSnapshot,
+): {readonly label: string; readonly hint: string} | undefined => {
+  if (snapshot.step === 'profile-name') {
+    return {label: 'Profile name', hint: 'Type a profile name, then press Enter'};
+  }
+  if (snapshot.step === 'supervisor-model') {
+    return {label: 'Supervisor model', hint: 'Type the exact supervisor model, then press Enter'};
+  }
+  if (snapshot.step === 'worker-model') {
+    return {label: 'Worker model', hint: 'Type the exact worker model, then press Enter'};
+  }
+  return undefined;
+};
+
 export const handleSettingsInput = (
   controller: SettingsViewController,
   character: string,
@@ -92,13 +137,14 @@ export const SettingsView = ({
     handleSettingsInput(controller, character, key);
   });
   const accent = noColor ? undefined : 'cyan';
+  const field = textField(snapshot);
   return (
     <Box flexDirection="column" paddingX={1} aria-label="Agent Foreman global profile settings">
       <Text bold {...(accent === undefined ? {} : {color: accent})}>
         Agent Foreman Settings
       </Text>
       <Text>
-        Step: {snapshot.title}
+        Step {settingsStepNumber(snapshot.step)}/{SETTINGS_TOTAL_STEPS}: {snapshot.title}
         {snapshot.busy ? ' · working' : ''}
       </Text>
       {configPath === undefined ? null : <Text dimColor>Global config: {configPath}</Text>}
@@ -112,7 +158,15 @@ export const SettingsView = ({
           ))}
         </Box>
       )}
-      {snapshot.input === '' ? null : <Text>Input: {snapshot.input}</Text>}
+      {field === undefined ? null : (
+        <Box flexDirection="column" marginTop={1} aria-label={field.label}>
+          <Text>
+            {field.label}: {snapshot.input}
+            <Text inverse>▌</Text>
+          </Text>
+          <Text dimColor>{field.hint}</Text>
+        </Box>
+      )}
       {snapshot.validation === undefined ? null : (
         <Box flexDirection="column" marginTop={1} aria-label="Provider validation">
           <Text>Validation: {snapshot.validation.status}</Text>
