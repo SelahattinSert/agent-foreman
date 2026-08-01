@@ -1,5 +1,3 @@
-import path from 'node:path';
-
 import {ExecutionWorkspaceSchema, type ExecutionWorkspace} from '@agent-foreman/contracts';
 import {
   ApplyConflictError,
@@ -9,6 +7,7 @@ import {
 
 import {collectWorkspaceDiff, type WorkspaceDiff} from './diff.js';
 import {discoverGitRepository, runGit} from './git.js';
+import {canonicalPath} from './path-identity.js';
 import {applySnapshotWorkspaceChanges} from './snapshot.js';
 
 export interface ApplyWorkspaceChangesInput {
@@ -29,11 +28,12 @@ export const applyWorkspaceChanges = async (
   if (!input.approved) {
     throw new PermissionDeniedError('Changes require explicit user apply approval.');
   }
-  const sourceRoot = path.resolve(input.sourceProjectRoot);
-  if (
-    input.workspace.sourceProjectRoot === undefined ||
-    sourceRoot !== path.resolve(input.workspace.sourceProjectRoot)
-  ) {
+  if (input.workspace.sourceProjectRoot === undefined) {
+    throw new ApplyConflictError('Apply target does not match the workspace source repository.');
+  }
+  const sourceRoot = await canonicalPath(input.sourceProjectRoot);
+  const recordedSourceRoot = await canonicalPath(input.workspace.sourceProjectRoot);
+  if (sourceRoot !== recordedSourceRoot) {
     throw new ApplyConflictError('Apply target does not match the workspace source repository.');
   }
   if (input.workspace.baselineFingerprint === undefined) {

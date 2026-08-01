@@ -1,4 +1,4 @@
-import {mkdir, mkdtemp, readFile, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, readFile, realpath, symlink, writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -13,6 +13,34 @@ import {
 } from '../src/index.js';
 
 describe('non-Git snapshot workspace', () => {
+  test('uses canonical path identities when the source and data roots are symlinked', async () => {
+    const fixture = await mkdtemp(path.join(os.tmpdir(), 'af-snapshot-canonical-'));
+    const source = path.join(fixture, 'source');
+    const data = path.join(fixture, 'data');
+    const sourceAlias = path.join(fixture, 'source-alias');
+    const dataAlias = path.join(fixture, 'data-alias');
+    await mkdir(source);
+    await mkdir(data);
+    await writeFile(path.join(source, 'value.txt'), 'baseline\n');
+    const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
+    await symlink(source, sourceAlias, symlinkType);
+    await symlink(data, dataAlias, symlinkType);
+
+    const workspace = await prepareSnapshotWorkspace({
+      projectRoot: sourceAlias,
+      taskId: 'snapshot-canonical',
+      dataDirectory: dataAlias,
+    });
+
+    expect(workspace.sourceProjectRoot).toBe(await realpath(source));
+    expect(workspace.path).toBe(
+      await realpath(path.join(data, 'snapshots', 'snapshot-canonical', 'workspace')),
+    );
+    await writeFile(path.join(workspace.path, 'value.txt'), 'implemented\n');
+    await applyWorkspaceChanges({workspace, sourceProjectRoot: sourceAlias, approved: true});
+    expect(await readFile(path.join(source, 'value.txt'), 'utf8')).toBe('implemented\n');
+  });
+
   test('excludes secrets, produces a real diff, and applies only after source verification and approval', async () => {
     const fixture = await mkdtemp(path.join(os.tmpdir(), 'af-snapshot-'));
     const source = path.join(fixture, 'source');

@@ -5,6 +5,7 @@ import {ExecutionWorkspaceSchema, type ExecutionWorkspace} from '@agent-foreman/
 import {WorkspaceConflictError, WorkspacePreparationError} from '@agent-foreman/core';
 
 import {discoverGitRepository, requireGit} from './git.js';
+import {canonicalPath} from './path-identity.js';
 
 export type DirtyWorkspaceStrategy = 'cancel' | 'head-worktree' | 'include-tracked';
 
@@ -64,6 +65,7 @@ export const prepareGitWorkspace = async (
     workspacePath,
     repository.headRevision,
   ]);
+  const resolvedWorkspacePath = await canonicalPath(workspacePath);
 
   let baseTree = repository.headRevision;
   let includedTrackedChanges = false;
@@ -86,9 +88,9 @@ export const prepareGitWorkspace = async (
         'HEAD',
         '--',
       ]);
-      if (patch !== '') await requireGit(workspacePath, ['apply', '--binary', '-'], patch);
-      await requireGit(workspacePath, ['add', '-A', '--', '.']);
-      baseTree = (await requireGit(workspacePath, ['write-tree'])).trim();
+      if (patch !== '') await requireGit(resolvedWorkspacePath, ['apply', '--binary', '-'], patch);
+      await requireGit(resolvedWorkspacePath, ['add', '-A', '--', '.']);
+      baseTree = (await requireGit(resolvedWorkspacePath, ['write-tree'])).trim();
       includedTrackedChanges = true;
     }
   } catch (error: unknown) {
@@ -103,7 +105,7 @@ export const prepareGitWorkspace = async (
 
   return ExecutionWorkspaceSchema.parse({
     id: input.taskId,
-    path: workspacePath,
+    path: resolvedWorkspacePath,
     mode: 'worktree',
     status: 'READY',
     baseRevision: repository.headRevision,
@@ -125,27 +127,28 @@ export const discardGitWorkspace = async (
   if (workspace.mode !== 'worktree' || workspace.sourceProjectRoot === undefined) {
     throw new WorkspacePreparationError('Only a recorded Git worktree can be discarded safely.');
   }
-  const workspacePath = path.resolve(workspace.path);
-  const sourceRoot = path.resolve(workspace.sourceProjectRoot);
+  const sourceRoot = await canonicalPath(workspace.sourceProjectRoot);
+  let workspacePath: string;
+  try {
+    workspacePath = await canonicalPath(workspace.path);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return ExecutionWorkspaceSchema.parse({...workspace, status: 'DISCARDED'});
+    }
+    throw error;
+  }
   if (workspacePath === sourceRoot || sourceRoot.startsWith(`${workspacePath}${path.sep}`)) {
     throw new WorkspacePreparationError('Refusing to discard a source repository path.');
   }
   const registered = await requireGit(sourceRoot, ['worktree', 'list', '--porcelain']);
-  const registeredPaths = registered
+  const registeredPathValues = registered
     .split('\n')
     .filter((line) => line.startsWith('worktree '))
-    .map((line) => path.resolve(line.slice('worktree '.length)));
+    .map((line) => line.slice('worktree '.length));
+  const registeredPaths = await Promise.all(registeredPathValues.map(canonicalPath));
   if (registeredPaths.includes(workspacePath)) {
     await requireGit(sourceRoot, ['worktree', 'remove', '--force', workspacePath]);
   } else {
-    try {
-      await access(workspacePath);
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return ExecutionWorkspaceSchema.parse({...workspace, status: 'DISCARDED'});
-      }
-      throw error;
-    }
     throw new WorkspaceConflictError(
       'Workspace path exists but is no longer registered as the recorded Git worktree.',
       {diagnostics: {workspacePath}},

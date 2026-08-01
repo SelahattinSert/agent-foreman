@@ -1,6 +1,7 @@
 import {access, mkdtemp, mkdir, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 
 import {describe, expect, test, vi} from 'vitest';
 
@@ -32,11 +33,22 @@ const createSkillSource = async (root: string): Promise<string> => {
   return source;
 };
 
+const runtimePaths = (
+  root: string,
+): {
+  readonly cliEntrypoint: string;
+  readonly codexBinary: string;
+  readonly nodeExecutable: string;
+} => ({
+  cliEntrypoint: path.join(root, 'agent-foreman', 'main.js'),
+  codexBinary: path.join(root, 'codex'),
+  nodeExecutable: path.join(root, 'node'),
+});
+
 describe('Codex skill and MCP setup', () => {
   test('ships namespaced workflow commands that Codex does not intercept as slash commands', async () => {
-    const skillPath = path.resolve(
-      path.dirname(new URL(import.meta.url).pathname),
-      '../../../skills/agent-foreman/SKILL.md',
+    const skillPath = fileURLToPath(
+      new URL('../../../skills/agent-foreman/SKILL.md', import.meta.url),
     );
     const skill = await readFile(skillPath, 'utf8');
 
@@ -51,6 +63,7 @@ describe('Codex skill and MCP setup', () => {
     const root = await mkdtemp(path.join(tmpdir(), 'agent-foreman-setup-'));
     const skillSourceDirectory = await createSkillSource(root);
     const codexHome = path.join(root, 'codex-home');
+    const runtime = runtimePaths(root);
     const calls: ProcessRunInput[] = [];
     const run = vi.fn(async (input: ProcessRunInput) => {
       calls.push(input);
@@ -62,9 +75,7 @@ describe('Codex skill and MCP setup', () => {
     const result = await setupCodexIntegration({
       codexHome,
       skillSourceDirectory,
-      nodeExecutable: '/absolute/node',
-      cliEntrypoint: '/absolute/agent-foreman/main.js',
-      codexBinary: '/absolute/codex',
+      ...runtime,
       run,
     });
 
@@ -79,14 +90,14 @@ describe('Codex skill and MCP setup', () => {
       ),
     ).toContain('allow_implicit_invocation: false');
     expect(calls.at(-1)).toMatchObject({
-      executable: '/absolute/codex',
+      executable: runtime.codexBinary,
       args: [
         'mcp',
         'add',
         'agent-foreman',
         '--',
-        '/absolute/node',
-        '/absolute/agent-foreman/main.js',
+        runtime.nodeExecutable,
+        runtime.cliEntrypoint,
         'mcp',
         'serve',
       ],
@@ -97,6 +108,7 @@ describe('Codex skill and MCP setup', () => {
     const root = await mkdtemp(path.join(tmpdir(), 'agent-foreman-setup-'));
     const skillSourceDirectory = await createSkillSource(root);
     const codexHome = path.join(root, 'codex-home');
+    const runtime = runtimePaths(root);
     let installed = false;
     const run = vi.fn(async (input: ProcessRunInput) => {
       if (input.args?.[1] === 'get') {
@@ -107,8 +119,8 @@ describe('Codex skill and MCP setup', () => {
                 name: 'agent-foreman',
                 transport: {
                   type: 'stdio',
-                  command: '/absolute/node',
-                  args: ['/absolute/main.js', 'mcp', 'serve'],
+                  command: runtime.nodeExecutable,
+                  args: [runtime.cliEntrypoint, 'mcp', 'serve'],
                 },
               }),
             )
@@ -120,9 +132,7 @@ describe('Codex skill and MCP setup', () => {
     const input = {
       codexHome,
       skillSourceDirectory,
-      nodeExecutable: '/absolute/node',
-      cliEntrypoint: '/absolute/main.js',
-      codexBinary: '/absolute/codex',
+      ...runtime,
       run,
     } as const;
 
@@ -137,6 +147,7 @@ describe('Codex skill and MCP setup', () => {
     const root = await mkdtemp(path.join(tmpdir(), 'agent-foreman-setup-'));
     const skillSourceDirectory = await createSkillSource(root);
     const codexHome = path.join(root, 'codex-home');
+    const runtime = runtimePaths(root);
     const unmanaged = path.join(codexHome, 'skills', 'agent-foreman');
     await mkdir(unmanaged, {recursive: true});
     await writeFile(path.join(unmanaged, 'SKILL.md'), 'user-owned');
@@ -145,9 +156,7 @@ describe('Codex skill and MCP setup', () => {
       setupCodexIntegration({
         codexHome,
         skillSourceDirectory,
-        nodeExecutable: '/absolute/node',
-        cliEntrypoint: '/absolute/main.js',
-        codexBinary: '/absolute/codex',
+        ...runtime,
         run: vi.fn(async () =>
           processResult(1, '', "Error: No MCP server named 'agent-foreman' found."),
         ),
@@ -158,6 +167,7 @@ describe('Codex skill and MCP setup', () => {
   test('refuses to replace a different MCP registration without --replace', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'agent-foreman-setup-'));
     const skillSourceDirectory = await createSkillSource(root);
+    const runtime = runtimePaths(root);
     const run = vi.fn(async () =>
       processResult(
         0,
@@ -165,7 +175,7 @@ describe('Codex skill and MCP setup', () => {
           name: 'agent-foreman',
           transport: {
             type: 'stdio',
-            command: '/some/other/runtime',
+            command: path.join(root, 'some-other-runtime'),
             args: ['serve'],
           },
         }),
@@ -176,9 +186,7 @@ describe('Codex skill and MCP setup', () => {
       setupCodexIntegration({
         codexHome: path.join(root, 'codex-home'),
         skillSourceDirectory,
-        nodeExecutable: '/absolute/node',
-        cliEntrypoint: '/absolute/main.js',
-        codexBinary: '/absolute/codex',
+        ...runtime,
         run,
       }),
     ).rejects.toThrow(/different.*MCP/iu);
@@ -189,6 +197,7 @@ describe('Codex skill and MCP setup', () => {
     const root = await mkdtemp(path.join(tmpdir(), 'agent-foreman-setup-'));
     const skillSourceDirectory = await createSkillSource(root);
     const codexHome = path.join(root, 'codex-home');
+    const runtime = runtimePaths(root);
     let registered = false;
     const run = vi.fn(async (input: ProcessRunInput) => {
       if (input.args?.[1] === 'get') {
@@ -197,8 +206,8 @@ describe('Codex skill and MCP setup', () => {
               0,
               JSON.stringify({
                 transport: {
-                  command: '/absolute/node',
-                  args: ['/absolute/main.js', 'mcp', 'serve'],
+                  command: runtime.nodeExecutable,
+                  args: [runtime.cliEntrypoint, 'mcp', 'serve'],
                 },
               }),
             )
@@ -210,17 +219,13 @@ describe('Codex skill and MCP setup', () => {
     await setupCodexIntegration({
       codexHome,
       skillSourceDirectory,
-      nodeExecutable: '/absolute/node',
-      cliEntrypoint: '/absolute/main.js',
-      codexBinary: '/absolute/codex',
+      ...runtime,
       run,
     });
 
     const removed = await removeCodexIntegration({
       codexHome,
-      nodeExecutable: '/absolute/node',
-      cliEntrypoint: '/absolute/main.js',
-      codexBinary: '/absolute/codex',
+      ...runtime,
       run,
     });
 
@@ -231,9 +236,7 @@ describe('Codex skill and MCP setup', () => {
     await expect(
       removeCodexIntegration({
         codexHome,
-        nodeExecutable: '/absolute/node',
-        cliEntrypoint: '/absolute/main.js',
-        codexBinary: '/absolute/codex',
+        ...runtime,
         run,
       }),
     ).resolves.toEqual({skillChanged: false, mcpChanged: false});

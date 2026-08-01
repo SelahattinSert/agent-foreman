@@ -1,4 +1,4 @@
-import {chmod, mkdir, mkdtemp, symlink, writeFile} from 'node:fs/promises';
+import {chmod, mkdir, mkdtemp, realpath, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 
@@ -26,7 +26,7 @@ describe('discoverBinary', () => {
 
     await expect(
       discoverBinary({binaryName: 'provider', pathValue: pathDirectory, platform: 'linux'}),
-    ).resolves.toBe(realBinary);
+    ).resolves.toBe(await realpath(realBinary));
   });
 
   test('excludes the managed shim directory while resolving the real binary', async () => {
@@ -46,7 +46,7 @@ describe('discoverBinary', () => {
         excludedDirectories: [shimDirectory],
         platform: 'linux',
       }),
-    ).resolves.toBe(realBinary);
+    ).resolves.toBe(await realpath(realBinary));
   });
 
   test('rejects a candidate that resolves to the current shim identity', async () => {
@@ -76,6 +76,6 @@ describe('discoverBinary', () => {
         platform: 'win32',
         pathExtensions: ['.CMD'],
       }),
-    ).resolves.toBe(binary);
+    ).resolves.toBe(await realpath(binary));
   });
 });

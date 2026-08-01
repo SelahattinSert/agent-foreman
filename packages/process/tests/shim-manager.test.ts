@@ -1,4 +1,4 @@
-import {chmod, mkdir, mkdtemp, readFile, writeFile} from 'node:fs/promises';
+import {chmod, mkdir, mkdtemp, readFile, realpath, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 
@@ -48,7 +48,7 @@ describe('shim manager', () => {
     expect(await readFile(realBinary, 'utf8')).toBe(originalRealBinary);
     await expect(inspectShim({providerId: 'codex', dataDirectory})).resolves.toMatchObject({
       status: 'installed',
-      metadata: {realBinaryPath: realBinary},
+      metadata: {realBinaryPath: await realpath(realBinary)},
     });
   });
 

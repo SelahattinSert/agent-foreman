@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import {describe, expect, test, vi} from 'vitest';
 
-import {parseConfigToml} from '@agent-foreman/config';
+import {defaultGlobalConfigPath, parseConfigToml} from '@agent-foreman/config';
 
 import {createCliProgram} from '../src/cli.js';
 import {resolveWorkspaceExecutionMode} from '../src/commands/real-run.js';
@@ -70,6 +70,9 @@ describe('Agent Foreman CLI', () => {
       `agent-foreman-cli-profile-${String(process.pid)}-${String(Date.now())}`,
     );
     vi.stubEnv('XDG_CONFIG_HOME', configRoot);
+    vi.stubEnv('HOME', configRoot);
+    vi.stubEnv('USERPROFILE', configRoot);
+    vi.stubEnv('APPDATA', configRoot);
     const program = createCliProgram({
       frontendProvider: 'standalone',
       runReal: vi.fn(async () => undefined),
@@ -96,14 +99,15 @@ describe('Agent Foreman CLI', () => {
       {from: 'user'},
     );
 
-    const config = parseConfigToml(
-      await readFile(path.join(configRoot, 'agent-foreman', 'config.toml'), 'utf8'),
-    );
-    expect(config.profiles?.daily).toMatchObject({
-      supervisor: {provider: 'codex-cli', model: 'supervisor-model'},
-      worker: {provider: 'antigravity-cli', model: 'worker-model'},
-    });
-    vi.unstubAllEnvs();
+    try {
+      const config = parseConfigToml(await readFile(defaultGlobalConfigPath(), 'utf8'));
+      expect(config.profiles?.daily).toMatchObject({
+        supervisor: {provider: 'codex-cli', model: 'supervisor-model'},
+        worker: {provider: 'antigravity-cli', model: 'worker-model'},
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   test('routes settings through the injected terminal-aware entry point', async () => {

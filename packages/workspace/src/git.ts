@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {realpath} from 'node:fs/promises';
 import path from 'node:path';
 
 import {WorkspacePreparationError} from '@agent-foreman/core';
@@ -57,7 +58,7 @@ export const discoverGitRepository = async (projectRoot: string): Promise<Reposi
   const requestedRoot = path.resolve(projectRoot);
   const rootResult = await runGit(requestedRoot, ['rev-parse', '--show-toplevel']);
   if (rootResult.exitCode !== 0) return {kind: 'none', projectRoot: requestedRoot};
-  const resolvedRoot = path.resolve(rootResult.stdout.trim());
+  const resolvedRoot = await realpath(path.resolve(rootResult.stdout.trim()));
   const [commonRaw, headRaw, branchResult, status, trackedRaw, untrackedRaw] = await Promise.all([
     requireGit(resolvedRoot, ['rev-parse', '--git-common-dir']),
     requireGit(resolvedRoot, ['rev-parse', 'HEAD']),
@@ -67,7 +68,7 @@ export const discoverGitRepository = async (projectRoot: string): Promise<Reposi
     requireGit(resolvedRoot, ['ls-files', '--others', '--exclude-standard', '-z']),
   ]);
   const commonValue = commonRaw.trim();
-  const gitCommonDirectory = path.resolve(resolvedRoot, commonValue);
+  const gitCommonDirectory = await realpath(path.resolve(resolvedRoot, commonValue));
   const headRevision = headRaw.trim();
   const branch = branchResult.exitCode === 0 ? branchResult.stdout.trim() : undefined;
   const baselineFingerprint = createHash('sha256')

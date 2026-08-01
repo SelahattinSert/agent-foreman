@@ -28,6 +28,7 @@ import {runProcess} from '@agent-foreman/process';
 
 import type {ApplyWorkspaceChangesResult} from './apply.js';
 import type {WorkspaceDiff} from './diff.js';
+import {canonicalPath} from './path-identity.js';
 
 const manifestVersion = 1 as const;
 const safeTaskIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
@@ -150,8 +151,11 @@ export const prepareSnapshotWorkspace = async (
   if (!safeTaskIdPattern.test(input.taskId)) {
     throw new WorkspacePreparationError('Task ID is not safe for a snapshot path.');
   }
-  const sourceRoot = path.resolve(input.projectRoot);
-  const snapshotRoot = path.join(path.resolve(input.dataDirectory), 'snapshots', input.taskId);
+  const sourceRoot = await canonicalPath(input.projectRoot);
+  const requestedDataDirectory = path.resolve(input.dataDirectory);
+  await mkdir(requestedDataDirectory, {recursive: true, mode: 0o700});
+  const dataDirectory = await canonicalPath(requestedDataDirectory);
+  const snapshotRoot = path.join(dataDirectory, 'snapshots', input.taskId);
   try {
     await access(snapshotRoot);
     throw new WorkspaceConflictError('Snapshot workspace path already exists.', {
@@ -277,8 +281,9 @@ export const applySnapshotWorkspaceChanges = async (input: {
   if (!input.approved)
     throw new PermissionDeniedError('Changes require explicit user apply approval.');
   const manifest = await readManifest(input.workspace);
-  const sourceRoot = path.resolve(input.sourceProjectRoot);
-  if (sourceRoot !== path.resolve(manifest.sourceProjectRoot)) {
+  const sourceRoot = await canonicalPath(input.sourceProjectRoot);
+  const recordedSourceRoot = await canonicalPath(manifest.sourceProjectRoot);
+  if (sourceRoot !== recordedSourceRoot) {
     throw new ApplyConflictError('Snapshot apply target does not match its recorded source.');
   }
   const source = await walk(sourceRoot, {excludeSensitive: true});

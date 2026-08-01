@@ -1,4 +1,4 @@
-import {access, mkdir, mkdtemp, readFile, writeFile} from 'node:fs/promises';
+import {access, mkdir, mkdtemp, readFile, realpath, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 
@@ -75,6 +75,35 @@ describe('Git execution workspace', () => {
     await applyWorkspaceChanges({workspace, sourceProjectRoot: fixture.root, approved: true});
     expect(await readFile(path.join(fixture.root, 'source.txt'), 'utf8')).toBe('implemented\n');
     expect(await readFile(path.join(fixture.root, 'new file.txt'), 'utf8')).toBe('new\n');
+  });
+
+  test('uses canonical path identities for symlinked repositories and worktree data', async () => {
+    await mkdir(fixture.dataDirectory, {recursive: true});
+    const fixtureRoot = path.dirname(fixture.root);
+    const projectAlias = path.join(fixtureRoot, 'project-alias');
+    const dataAlias = path.join(fixtureRoot, 'data-alias');
+    const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
+    await symlink(fixture.root, projectAlias, symlinkType);
+    await symlink(fixture.dataDirectory, dataAlias, symlinkType);
+
+    const workspace = await prepareGitWorkspace({
+      projectRoot: projectAlias,
+      taskId: 'task-canonical-paths',
+      dataDirectory: dataAlias,
+      dirtyStrategy: 'cancel',
+    });
+
+    expect(workspace.sourceProjectRoot).toBe(await realpath(fixture.root));
+    expect(workspace.path).toBe(
+      await realpath(path.join(fixture.dataDirectory, 'worktrees', 'task-canonical-paths')),
+    );
+
+    await writeFile(path.join(workspace.path, 'source.txt'), 'canonical aliases\n');
+    await applyWorkspaceChanges({workspace, sourceProjectRoot: projectAlias, approved: true});
+    expect(await readFile(path.join(fixture.root, 'source.txt'), 'utf8')).toBe(
+      'canonical aliases\n',
+    );
+    await expect(discardGitWorkspace(workspace)).resolves.toMatchObject({status: 'DISCARDED'});
   });
 
   test('stops without applying when the source repository changed after workspace creation', async () => {
