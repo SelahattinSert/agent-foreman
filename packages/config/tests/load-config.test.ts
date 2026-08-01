@@ -6,9 +6,23 @@ import {describe, expect, test} from 'vitest';
 
 import {ConfigurationError} from '@agent-foreman/core';
 
-import {loadResolvedConfig, parseConfigToml, resolveConfig} from '../src/index.js';
+import {
+  defaultGlobalConfigPath,
+  loadResolvedConfig,
+  parseConfigToml,
+  resolveConfig,
+} from '../src/index.js';
 
 describe('TOML configuration loading', () => {
+  test('uses the target platform path semantics independently of the host OS', () => {
+    expect(defaultGlobalConfigPath({HOME: '/Users/foreman'}, 'darwin')).toBe(
+      '/Users/foreman/Library/Application Support/Agent Foreman/config.toml',
+    );
+    expect(
+      defaultGlobalConfigPath({USERPROFILE: 'C:\\Users\\Foreman', APPDATA: 'C:\\Roaming'}, 'win32'),
+    ).toBe('C:\\Roaming\\Agent Foreman\\config.toml');
+  });
+
   test('normalizes documented snake_case keys and command arrays', () => {
     const config = parseConfigToml(`
       version = 1

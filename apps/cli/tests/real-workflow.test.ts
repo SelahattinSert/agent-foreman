@@ -59,6 +59,8 @@ const repository = async (): Promise<{root: string; data: string}> => {
   await git(root, ['init']);
   await git(root, ['config', 'user.email', 'fixture@example.test']);
   await git(root, ['config', 'user.name', 'Fixture']);
+  await git(root, ['config', 'core.autocrlf', 'false']);
+  await git(root, ['config', 'core.eol', 'lf']);
   await writeFile(path.join(root, 'result.txt'), 'baseline\n');
   await git(root, ['add', 'result.txt']);
   await git(root, ['commit', '-m', 'baseline']);

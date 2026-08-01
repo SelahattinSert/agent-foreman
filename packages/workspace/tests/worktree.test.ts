@@ -50,7 +50,11 @@ describe('Git execution workspace', () => {
 
   test('discovers repository identity and cleanliness', async () => {
     const discovery = await discoverGitRepository(fixture.root);
-    expect(discovery).toMatchObject({kind: 'git', projectRoot: fixture.root, clean: true});
+    expect(discovery).toMatchObject({
+      kind: 'git',
+      projectRoot: await realpath(fixture.root),
+      clean: true,
+    });
     expect(discovery.kind === 'git' ? discovery.headRevision : '').toMatch(/^[a-f0-9]{40}$/u);
   });
 

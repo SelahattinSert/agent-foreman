@@ -1,4 +1,4 @@
-import {chmod, mkdtemp, readFile, writeFile} from 'node:fs/promises';
+import {chmod, mkdir, mkdtemp, readFile, realpath, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 
@@ -168,6 +168,10 @@ describe('Gemini/Antigravity worker adapter', () => {
     const root = await mkdtemp(path.join(tmpdir(), 'agent-foreman-worker-'));
     const binary = await writeWorkerFixture(root);
     const argsFile = path.join(root, 'args.json');
+    const workspace = path.join(root, 'workspace');
+    const workspaceAlias = path.join(root, 'workspace-alias');
+    await mkdir(workspace);
+    await symlink(workspace, workspaceAlias, process.platform === 'win32' ? 'junction' : 'dir');
     const transport = new HeadlessWorkerCliTransport({
       binary,
       probe: async () => probeResult,
@@ -185,7 +189,7 @@ describe('Gemini/Antigravity worker adapter', () => {
       executionId: 'execution-001',
       prompt: 'worker prompt',
       outputSchema: z.toJSONSchema(z.object({schemaVersion: z.literal(1)})),
-      cwd: root,
+      cwd: workspaceAlias,
       model: 'configured-worker-model',
       effort: 'medium',
       timeoutMs: 10_000,
@@ -206,7 +210,8 @@ describe('Gemini/Antigravity worker adapter', () => {
         toolPermission: string;
       };
     };
-    expect(invocation.cwd).toBe(root);
+    const canonicalWorkspace = await realpath(workspace);
+    expect(invocation.cwd).toBe(canonicalWorkspace);
     expect(invocation.args).toEqual(
       expect.arrayContaining([
         '--print',
@@ -231,12 +236,12 @@ describe('Gemini/Antigravity worker adapter', () => {
       },
       toolPermission: 'proceed-in-sandbox',
     });
-    expect(invocation.settings.permissions.allow).toContain(`write_file(${path.resolve(root)})`);
+    expect(invocation.settings.permissions.allow).toContain(`write_file(${canonicalWorkspace})`);
     expect(invocation.settings.permissions.deny).toContain('read_url(*)');
     expect(invocation.settings.permissions.deny).toContain('execute_url(*)');
     expect(invocation.settings.permissions.deny).toContain('mcp(*)');
     expect(invocation.settings.permissions.deny).toContain(
-      `write_file(${path.join(root, '.git')})`,
+      `write_file(${path.join(canonicalWorkspace, '.git')})`,
     );
   });
 

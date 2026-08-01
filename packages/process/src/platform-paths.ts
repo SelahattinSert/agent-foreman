@@ -13,12 +13,15 @@ export interface PlatformPathInput {
   readonly platform?: NodeJS.Platform;
 }
 
-const requiredUserDirectory = (environment: NodeJS.ProcessEnv): string => {
+const requiredUserDirectory = (
+  environment: NodeJS.ProcessEnv,
+  platformPath: typeof path.posix,
+): string => {
   const userDirectory = environment.HOME ?? environment.USERPROFILE;
   if (userDirectory === undefined || userDirectory.trim() === '') {
     throw new ConfigurationError('Cannot determine the user directory for Agent Foreman data.');
   }
-  return path.resolve(userDirectory);
+  return platformPath.resolve(userDirectory);
 };
 
 export const getAgentForemanPlatformPaths = (
@@ -26,39 +29,41 @@ export const getAgentForemanPlatformPaths = (
 ): AgentForemanPlatformPaths => {
   const environment = input.environment ?? process.env;
   const platform = input.platform ?? process.platform;
-  const userDirectory = requiredUserDirectory(environment);
+  const platformPath = platform === 'win32' ? path.win32 : path.posix;
+  const userDirectory = requiredUserDirectory(environment, platformPath);
 
   if (platform === 'win32') {
-    const applicationData = environment.APPDATA ?? path.join(userDirectory, 'AppData', 'Roaming');
+    const applicationData =
+      environment.APPDATA ?? platformPath.join(userDirectory, 'AppData', 'Roaming');
     const localApplicationData =
-      environment.LOCALAPPDATA ?? path.join(userDirectory, 'AppData', 'Local');
+      environment.LOCALAPPDATA ?? platformPath.join(userDirectory, 'AppData', 'Local');
     return {
-      configDirectory: path.join(applicationData, 'Agent Foreman'),
-      dataDirectory: path.join(localApplicationData, 'Agent Foreman'),
-      stateDirectory: path.join(localApplicationData, 'Agent Foreman'),
+      configDirectory: platformPath.join(applicationData, 'Agent Foreman'),
+      dataDirectory: platformPath.join(localApplicationData, 'Agent Foreman'),
+      stateDirectory: platformPath.join(localApplicationData, 'Agent Foreman'),
     };
   }
 
   if (platform === 'darwin') {
-    const applicationSupport = path.join(userDirectory, 'Library', 'Application Support');
+    const applicationSupport = platformPath.join(userDirectory, 'Library', 'Application Support');
     return {
-      configDirectory: path.join(applicationSupport, 'Agent Foreman'),
-      dataDirectory: path.join(applicationSupport, 'Agent Foreman'),
-      stateDirectory: path.join(applicationSupport, 'Agent Foreman'),
+      configDirectory: platformPath.join(applicationSupport, 'Agent Foreman'),
+      dataDirectory: platformPath.join(applicationSupport, 'Agent Foreman'),
+      stateDirectory: platformPath.join(applicationSupport, 'Agent Foreman'),
     };
   }
 
   return {
-    configDirectory: path.join(
-      environment.XDG_CONFIG_HOME ?? path.join(userDirectory, '.config'),
+    configDirectory: platformPath.join(
+      environment.XDG_CONFIG_HOME ?? platformPath.join(userDirectory, '.config'),
       'agent-foreman',
     ),
-    dataDirectory: path.join(
-      environment.XDG_DATA_HOME ?? path.join(userDirectory, '.local', 'share'),
+    dataDirectory: platformPath.join(
+      environment.XDG_DATA_HOME ?? platformPath.join(userDirectory, '.local', 'share'),
       'agent-foreman',
     ),
-    stateDirectory: path.join(
-      environment.XDG_STATE_HOME ?? path.join(userDirectory, '.local', 'state'),
+    stateDirectory: platformPath.join(
+      environment.XDG_STATE_HOME ?? platformPath.join(userDirectory, '.local', 'state'),
       'agent-foreman',
     ),
   };

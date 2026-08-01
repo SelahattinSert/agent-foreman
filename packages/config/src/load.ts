@@ -57,16 +57,17 @@ export const defaultGlobalConfigPath = (
   environment: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
 ): string => {
+  const platformPath = platform === 'win32' ? path.win32 : path.posix;
   const userDirectory = environment.HOME ?? environment.USERPROFILE ?? homedir();
   if (platform === 'win32') {
-    return path.join(
-      environment.APPDATA ?? path.join(userDirectory, 'AppData', 'Roaming'),
+    return platformPath.join(
+      environment.APPDATA ?? platformPath.join(userDirectory, 'AppData', 'Roaming'),
       'Agent Foreman',
       'config.toml',
     );
   }
   if (platform === 'darwin') {
-    return path.join(
+    return platformPath.join(
       userDirectory,
       'Library',
       'Application Support',
@@ -74,8 +75,8 @@ export const defaultGlobalConfigPath = (
       'config.toml',
     );
   }
-  return path.join(
-    environment.XDG_CONFIG_HOME ?? path.join(userDirectory, '.config'),
+  return platformPath.join(
+    environment.XDG_CONFIG_HOME ?? platformPath.join(userDirectory, '.config'),
     'agent-foreman',
     'config.toml',
   );

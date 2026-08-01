@@ -1,4 +1,4 @@
-import {mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, readFile, realpath, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 
@@ -198,6 +198,7 @@ export class HeadlessWorkerCliTransport implements WorkerCliTransport {
         'Worker CLI cannot disable slash-command expansion for literal structured prompts.',
       );
     }
+    const cwd = await realpath(path.resolve(input.cwd));
     const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'agent-foreman-worker-'));
     const schemaPath = path.join(temporaryDirectory, 'output-schema.json');
     const logPath = path.join(temporaryDirectory, 'agy.log');
@@ -209,7 +210,7 @@ export class HeadlessWorkerCliTransport implements WorkerCliTransport {
       await mkdir(settingsDirectory, {recursive: true, mode: 0o700});
       await writeFile(
         path.join(settingsDirectory, 'settings.json'),
-        `${JSON.stringify(antigravitySettings(input.cwd, this.options.sandbox !== false), null, 2)}\n`,
+        `${JSON.stringify(antigravitySettings(cwd, this.options.sandbox !== false), null, 2)}\n`,
         {mode: 0o600},
       );
       environment.HOME = isolatedHome;
@@ -253,7 +254,7 @@ export class HeadlessWorkerCliTransport implements WorkerCliTransport {
               timeout,
               conversation: input.providerSessionId ?? '',
               effort: input.effort ?? '',
-              workspace: input.cwd,
+              workspace: cwd,
               log: logPath,
             }),
             ...(input.providerSessionId === undefined && this.options.newProject === true
@@ -267,7 +268,7 @@ export class HeadlessWorkerCliTransport implements WorkerCliTransport {
       const result = await runProcess({
         executable: this.options.binary,
         args,
-        cwd: input.cwd,
+        cwd,
         environment,
         inheritEnvironment: false,
         stdio: 'capture',
