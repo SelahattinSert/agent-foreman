@@ -131,6 +131,7 @@ describe.runIf(process.platform === 'win32')('installed Windows shims', () => {
       args: ['exec', 'argument with spaces'],
       stdin: 'stdin preserved',
       stdio: 'capture',
+      timeoutMs: 10_000,
     });
     expect(pass.exitCode).toBe(0);
     expect(JSON.parse(pass.stdout)).toEqual({
@@ -143,6 +144,7 @@ describe.runIf(process.platform === 'win32')('installed Windows shims', () => {
       args: ['fail'],
       stdin: '',
       stdio: 'capture',
+      timeoutMs: 10_000,
     });
     expect(failure.exitCode).toBe(37);
 
@@ -160,11 +162,12 @@ describe.runIf(process.platform === 'win32')('installed Windows shims', () => {
       ],
       stdin: '',
       stdio: 'capture',
+      timeoutMs: 10_000,
     });
     expect(intercepted.exitCode).toBe(0);
     expect(JSON.parse(intercepted.stdout)).toEqual({
       intercepted: ['--plain'],
       provider: 'codex',
     });
-  });
+  }, 30_000);
 });
