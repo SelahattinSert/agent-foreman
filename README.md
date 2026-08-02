@@ -25,10 +25,48 @@ User ↔ Codex supervisor: discover → discuss → draft/revise → explicit ap
 
 ## Installation
 
-Agent Foreman requires Node.js 22.18 or newer. From a package release:
+Agent Foreman requires Git and Node.js 22.18 or newer. The unscoped npm package named `agent-foreman` currently belongs to an unrelated project, so **do not run `npm install -g agent-foreman`** for this repository.
+
+Until Agent Foreman has an owned release channel, build one local package from the source checkout. These commands are identical on Linux, macOS, Windows PowerShell and Windows Command Prompt:
 
 ```sh
-npm install -g agent-foreman
+git clone https://github.com/SelahattinSert/agent-foreman.git
+cd agent-foreman
+npx pnpm@11.18.0 install --frozen-lockfile
+npx pnpm@11.18.0 build
+npx pnpm@11.18.0 package:cli
+```
+
+The last command creates `release/agent-foreman.tgz` without publishing anything. Install that exact file into a user-owned npm prefix using the section for your terminal.
+
+### Linux and macOS (Bash or Zsh)
+
+```sh
+npm install --global --prefix "$HOME/.local" ./release/agent-foreman.tgz
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+### Windows PowerShell
+
+```powershell
+$AfPrefix = Join-Path $env:LOCALAPPDATA 'Agent Foreman\npm'
+npm install --global --prefix "$AfPrefix" .\release\agent-foreman.tgz
+$env:Path = "$AfPrefix;$env:Path"
+```
+
+### Windows Command Prompt
+
+```bat
+set "AF_PREFIX=%LOCALAPPDATA%\Agent Foreman\npm"
+npm install --global --prefix "%AF_PREFIX%" ".\release\agent-foreman.tgz"
+set "PATH=%AF_PREFIX%;%PATH%"
+```
+
+The PATH command above affects only the current terminal. To make `af` available in future terminals, add `$HOME/.local/bin` on Linux/macOS or `%LOCALAPPDATA%\Agent Foreman\npm` on Windows to your user PATH through your shell profile or operating-system settings. Do not use `sudo` to work around npm permission errors.
+
+The Agent Foreman commands themselves are the same on every operating system:
+
+```sh
 af settings
 af doctor
 af setup codex
@@ -36,17 +74,9 @@ af setup codex
 
 `af setup codex` shows the exact changes, installs an explicitly invoked local skill, and registers the headless runtime as a Codex MCP stdio server through Codex's own `mcp` command. It does not replace the Codex binary, install a shim, or edit `PATH`. Restart Codex after setup.
 
-To remove only the hash-verified managed integration, run `af setup codex --remove`; modified or user-owned skill/MCP entries are refused.
+To remove only the hash-verified managed integration, run `af setup codex --remove`; modified or user-owned skill/MCP entries are refused. To update a source installation, pull the repository, repeat the common install/build/package commands, and reinstall the generated tarball with the command for your terminal.
 
-For repository development:
-
-```sh
-npx pnpm@11.18.0 install
-npx pnpm@11.18.0 build
-node apps/cli/dist/main.js doctor
-```
-
-pnpm is a contributor/build dependency, not a requirement for using the published CLI.
+pnpm is a contributor/build dependency invoked through pinned `npx`; a global pnpm installation is not required.
 
 ## Platform support
 

@@ -2,6 +2,12 @@
 
 Run `af doctor` first. It reports `PASS`, `WARN`, `FAIL` and `SKIP` with a remediation line and never needs a real model call to print a secret.
 
+## npm reports `EACCES`, or the installed package is not this project
+
+Do not use `sudo npm install -g` and do not install the unscoped npm package named `agent-foreman`; that registry name currently belongs to an unrelated project. Build `release/agent-foreman.tgz` from this repository and install that exact file into the user-owned prefix documented in the root [installation guide](../README.md#installation).
+
+The safe prefix is `$HOME/.local` on Linux/macOS and `%LOCALAPPDATA%\Agent Foreman\npm` on Windows. Adding its executable directory to PATH avoids writes to `/usr/local` and therefore avoids the `EACCES` error without weakening filesystem permissions. The README separates Bash/zsh, PowerShell and Command Prompt syntax; the subsequent `af settings`, `af doctor` and `af setup codex` commands are identical on every platform.
+
 ## `MODEL NOT SET`
 
 Agent Foreman never guesses. Create/edit a profile with both values, or pass `--supervisor-model` and `--worker-model` to `af run`:

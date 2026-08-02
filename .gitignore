@@ -13,6 +13,7 @@ coverage/
 .cache/
 .tmp/
 tmp/
+/release/
 
 # Local environment and credentials
 .env

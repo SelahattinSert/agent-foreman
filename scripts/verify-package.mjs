@@ -5,12 +5,12 @@ import {fileURLToPath} from 'node:url';
 
 import crossSpawn from 'cross-spawn';
 
+import {packageCli} from './package-cli.mjs';
+
 const repositoryRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'agent-foreman-package-smoke-'));
 const installPrefix = path.join(temporaryRoot, 'prefix');
-const tarballPath = path.join(temporaryRoot, 'agent-foreman.tgz');
 const smokeHome = path.join(temporaryRoot, 'home');
-const pnpmEntrypoint = path.join(repositoryRoot, 'node_modules', 'pnpm', 'bin', 'pnpm.mjs');
 
 const run = async (
   executable,
@@ -56,14 +56,7 @@ const run = async (
   });
 
 try {
-  await run(process.execPath, [
-    pnpmEntrypoint,
-    '--filter',
-    'agent-foreman',
-    'pack',
-    '--out',
-    tarballPath,
-  ]);
+  const tarballPath = await packageCli();
   await run('npm', [
     'install',
     '--global',
