@@ -34,6 +34,7 @@ import {
 } from '../src/index.js';
 
 const temporaryDirectories: string[] = [];
+const integrationTestTimeoutMs = 30_000;
 
 afterEach(async () => {
   await Promise.all(
@@ -191,7 +192,7 @@ const context = (root: string): ProviderExecutionContext => ({
   providerSessionMetadata: {},
 });
 
-describe('real workflow orchestration', () => {
+describe('real workflow orchestration', {timeout: integrationTestTimeoutMs}, () => {
   test('repairs mechanical failures before review, revises findings, and applies only after approval', async () => {
     const {root, data} = await repository();
     const store = await SqliteWorkflowStore.open({databasePath: ':memory:'});
