@@ -6,6 +6,7 @@ import {afterEach, describe, expect, test} from 'vitest';
 import {
   ApprovalChallengeSchema,
   TaskSessionSchema,
+  type ProviderHealth,
   type TaskPlan,
   type WorkerExecutionInput,
   type WorkerExecutionResult,
@@ -73,10 +74,23 @@ class FailOnceWorkerProvider extends FakeWorkerProvider {
   }
 }
 
+class FailOnceHealthCheckWorkerProvider extends FakeWorkerProvider {
+  public healthChecks = 0;
+
+  public override async healthCheck(): Promise<ProviderHealth> {
+    this.healthChecks += 1;
+    if (this.healthChecks === 1) {
+      return {status: 'FAIL', message: 'Configured worker model is unavailable.'};
+    }
+    return await super.healthCheck();
+  }
+}
+
 const connectedFixture = async (
   confirmation: boolean,
   worker: WorkerProvider = new FakeWorkerProvider(),
   persistence: 'memory' | 'sqlite' = 'memory',
+  failFirstApply = false,
 ): Promise<McpFixture> => {
   const store =
     persistence === 'sqlite'
@@ -112,6 +126,7 @@ const connectedFixture = async (
       additions: 1,
       deletions: 0,
     }),
+    validateApplyBaseline: async () => undefined,
     runQualityGates: async () => ({
       status: 'PASSED',
       failures: [],
@@ -119,16 +134,22 @@ const connectedFixture = async (
       completedAt: now,
       runs: [],
     }),
-    applyChanges: async (workspace) => ({
-      workspace: {...workspace, status: 'APPLIED'},
-      diff: {
-        patch: 'diff --git a/math.js b/math.js\n',
-        hash: 'd'.repeat(64),
-        changedFiles: [],
-        additions: 1,
-        deletions: 0,
-      },
-    }),
+    applyChanges: async (workspace) => {
+      if (failFirstApply) {
+        failFirstApply = false;
+        throw new Error('Fixture apply failed before mutating the source.');
+      }
+      return {
+        workspace: {...workspace, status: 'APPLIED'},
+        diff: {
+          patch: 'diff --git a/math.js b/math.js\n',
+          hash: 'd'.repeat(64),
+          changedFiles: [],
+          additions: 1,
+          deletions: 0,
+        },
+      };
+    },
     createWorkerContext: (session, workspace) => ({
       sessionId: session.id,
       projectRoot: session.projectRoot,
@@ -220,7 +241,7 @@ describe('Agent Foreman MCP server', () => {
   });
 
   test('requires client elicitation before freezing a plan and opening worker execution', async () => {
-    const fixture = await connectedFixture(true);
+    const fixture = await connectedFixture(true, new FakeWorkerProvider(), 'memory', true);
     fixtures.push(fixture);
     const createdResult = await fixture.client.callTool({
       name: 'agent_foreman_session_create',
@@ -331,11 +352,41 @@ describe('Agent Foreman MCP server', () => {
     const applyChallenge = ApprovalChallengeSchema.parse(
       (applyRequest.structuredContent as {challenge: unknown}).challenge,
     );
-    const applied = await fixture.client.callTool({
+    const failedApply = await fixture.client.callTool({
       name: 'agent_foreman_apply_approve',
       arguments: {
         sessionId: session.id,
         challengeId: applyChallenge.id,
+        reviewedDiffHash: 'd'.repeat(64),
+        sourceBaseline: 'baseline-1',
+      },
+    });
+    expect(failedApply.isError).toBe(true);
+
+    const applyRecovery = await fixture.client.callTool({
+      name: 'agent_foreman_resume',
+      arguments: {sessionId: session.id},
+    });
+    expect(applyRecovery.structuredContent).toMatchObject({
+      nextAction: 'REQUEST_APPLY_APPROVAL',
+      session: {state: 'AWAITING_APPLY_APPROVAL'},
+    });
+    const retryRequest = await fixture.client.callTool({
+      name: 'agent_foreman_apply_request',
+      arguments: {
+        sessionId: session.id,
+        reviewedDiffHash: 'd'.repeat(64),
+        sourceBaseline: 'baseline-1',
+      },
+    });
+    const retryChallenge = ApprovalChallengeSchema.parse(
+      (retryRequest.structuredContent as {challenge: unknown}).challenge,
+    );
+    const applied = await fixture.client.callTool({
+      name: 'agent_foreman_apply_approve',
+      arguments: {
+        sessionId: session.id,
+        challengeId: retryChallenge.id,
         reviewedDiffHash: 'd'.repeat(64),
         sourceBaseline: 'baseline-1',
       },
@@ -461,5 +512,75 @@ describe('Agent Foreman MCP server', () => {
       lastProviderExecution: {status: 'COMPLETED'},
     });
     expect(snapshot?.workerIterations[0]?.result).toBeUndefined();
+  });
+
+  test('allows retry after worker preflight fails before creating a workspace', async () => {
+    const worker = new FailOnceHealthCheckWorkerProvider();
+    const fixture = await connectedFixture(true, worker, 'sqlite');
+    fixtures.push(fixture);
+    const created = await fixture.client.callTool({
+      name: 'agent_foreman_session_create',
+      arguments: {
+        projectRoot: '/project',
+        frontendProvider: 'codex-native',
+        profileName: 'balanced',
+        task: 'Implement the approved task after the worker is healthy.',
+      },
+    });
+    const session = TaskSessionSchema.parse(created.structuredContent);
+    const plan = planFor(session.id);
+    const submittedResult = await fixture.client.callTool({
+      name: 'agent_foreman_plan_submit',
+      arguments: {sessionId: session.id, plan, markdown: '# Safe MCP plan'},
+    });
+    const submitted = submittedResult.structuredContent as {planHash: string};
+    const requested = await fixture.client.callTool({
+      name: 'agent_foreman_plan_approval_request',
+      arguments: {sessionId: session.id, planVersion: 1, planHash: submitted.planHash},
+    });
+    const challenge = ApprovalChallengeSchema.parse(requested.structuredContent);
+    const approvedResult = await fixture.client.callTool({
+      name: 'agent_foreman_plan_approve',
+      arguments: {
+        sessionId: session.id,
+        challengeId: challenge.id,
+        planHash: submitted.planHash,
+      },
+    });
+    const approved = approvedResult.structuredContent as {approvedPlanHash: string};
+
+    const failed = await fixture.client.callTool({
+      name: 'agent_foreman_worker_start',
+      arguments: {sessionId: session.id, approvedPlanHash: approved.approvedPlanHash},
+    });
+    expect(failed.isError).toBe(true);
+    expect(JSON.stringify(failed.content)).toContain('Configured worker model is unavailable.');
+
+    const resumed = await fixture.client.callTool({
+      name: 'agent_foreman_resume',
+      arguments: {sessionId: session.id},
+    });
+    expect(resumed.structuredContent).toMatchObject({
+      nextAction: 'START_WORKER',
+      session: {state: 'PAUSED'},
+      approvedPlanHash: approved.approvedPlanHash,
+    });
+
+    const retried = await fixture.client.callTool({
+      name: 'agent_foreman_worker_start',
+      arguments: {sessionId: session.id, approvedPlanHash: approved.approvedPlanHash},
+    });
+    expect(retried.isError).not.toBe(true);
+    expect(retried.structuredContent).toMatchObject({
+      phase: 'SEMANTIC',
+      session: {state: 'SUPERVISOR_REVIEW', iteration: 1},
+    });
+    expect(worker.healthChecks).toBe(2);
+    expect(worker.calls.execute).toHaveLength(1);
+    const snapshot = await fixture.store.loadResumeSnapshot(session.id);
+    expect(snapshot).toMatchObject({
+      workerIterations: [{iteration: 1, kind: 'INITIAL', result: {status: 'COMPLETED'}}],
+      workspace: {status: 'READY'},
+    });
   });
 });

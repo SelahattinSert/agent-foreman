@@ -8,6 +8,15 @@ Do not use `sudo npm install -g` and do not install the unscoped npm package nam
 
 The safe prefix is `$HOME/.local` on Linux/macOS and `%LOCALAPPDATA%\Agent Foreman\npm` on Windows. Adding its executable directory to PATH avoids writes to `/usr/local` and therefore avoids the `EACCES` error without weakening filesystem permissions. The README separates Bash/zsh, PowerShell and Command Prompt syntax; the subsequent `af settings`, `af doctor` and `af setup codex` commands are identical on every platform.
 
+## Setup refuses a locally modified Codex skill
+
+`af setup codex` verifies the installed managed skill's actual contents before
+reinstalling or upgrading it. If you edited any installed skill file, setup stops
+before changing the skill or MCP registration. Back up and inspect those edits,
+then move the customized directory to a separate location before reinstalling.
+Do not edit the ownership marker to bypass the check. `--replace` authorizes an
+MCP registration replacement, not deletion of your skill customizations.
+
 ## `MODEL NOT SET`
 
 Agent Foreman never guesses. Create/edit a profile with both values, or pass `--supervisor-model` and `--worker-model` to `af run`:
@@ -65,7 +74,7 @@ The isolated workspace does not share a mutable `node_modules` directory with th
 
 ## Apply conflict
 
-Agent Foreman stops if the source branch, Git fingerprint or snapshot files changed after workspace creation, or if `git apply --check` fails. It does not merge automatically. Inspect `af task diff <id>`, preserve the workspace, reconcile source changes, then resume. Snapshot write failures roll back completed writes and retain backup diagnostics.
+Agent Foreman stops if the source branch, Git fingerprint or snapshot files changed after workspace creation, or if `git apply --check` fails. It ignores only the registered execution worktree's own untracked directory when recomputing a Git fingerprint; unrelated source changes, including other untracked files, remain conflicts. It does not merge automatically. Inspect `af task diff <id>`, preserve the workspace, reconcile source changes, then resume. If an apply was interrupted before mutation and all recorded evidence still matches, resume returns to apply review and requires a fresh explicit apply approval. Snapshot write failures roll back completed writes and retain backup diagnostics.
 
 ## Interrupted task
 

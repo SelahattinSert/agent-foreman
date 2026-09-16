@@ -163,7 +163,12 @@ export class CliWorkerProvider implements WorkerProvider {
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line !== '' && !line.startsWith('Usage'));
-    return lines.map((id) => ModelDescriptorSchema.parse({id, displayName: id, available: true}));
+    return lines.map((line) => {
+      const [rawId = '', ...rawDisplayName] = line.split('\t');
+      const id = rawId.trim();
+      const displayName = rawDisplayName.join('\t').trim() || id;
+      return ModelDescriptorSchema.parse({id, displayName, available: true});
+    });
   }
 
   public async execute(

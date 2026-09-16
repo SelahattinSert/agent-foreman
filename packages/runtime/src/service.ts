@@ -356,6 +356,7 @@ export class HeadlessRuntimeService {
     ) {
       throw new PlanHashMismatchError('The apply request does not match the source baseline.');
     }
+    await this.execution.validateApplyBaseline(current.workspace);
     const createdAt = this.now();
     const challenge = ApprovalChallengeSchema.parse({
       schemaVersion: 1,
@@ -404,6 +405,7 @@ export class HeadlessRuntimeService {
         'The current diff or source baseline changed after apply review.',
       );
     }
+    await this.execution.validateApplyBaseline(current.workspace);
     const consumedAt = this.now();
     const challengeConsumption = {
       challengeId: input.challengeId,

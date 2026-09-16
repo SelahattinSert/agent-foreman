@@ -29,6 +29,7 @@ export const WorkflowEventSchema = z.discriminatedUnion('type', [
   z.strictObject({type: z.literal('USER_DECISION_RECEIVED')}),
   z.strictObject({type: z.literal('APPLY_REVIEW_READY')}),
   z.strictObject({type: z.literal('APPLY_APPROVED')}),
+  z.strictObject({type: z.literal('APPLY_RETRY_READY')}),
   z.strictObject({
     type: z.literal('CHANGES_APPLIED'),
     workspace: ExecutionWorkspaceSchema.optional(),

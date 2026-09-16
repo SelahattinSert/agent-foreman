@@ -132,6 +132,16 @@ describe('transitionWorkflow', () => {
     expect(completed).toMatchObject({state: 'COMPLETED', workspace});
   });
 
+  test('reopens apply approval after an interrupted apply is revalidated', () => {
+    const awaitingApproval = transitionWorkflow(
+      sessionIn('APPLYING_CHANGES'),
+      {type: 'APPLY_RETRY_READY'},
+      at,
+    );
+
+    expect(awaitingApproval.state).toBe('AWAITING_APPLY_APPROVAL');
+  });
+
   test('pauses and resumes only to the explicit saved state', () => {
     const paused = transitionWorkflow(
       sessionIn('SUPERVISOR_REVIEW'),

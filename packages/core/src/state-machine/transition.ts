@@ -115,6 +115,8 @@ const nextStateFor = (current: WorkflowState, event: WorkflowEvent): WorkflowSta
       return requireState(current, ['TECHNICALLY_APPROVED'], event, 'AWAITING_APPLY_APPROVAL');
     case 'APPLY_APPROVED':
       return requireState(current, ['AWAITING_APPLY_APPROVAL'], event, 'APPLYING_CHANGES');
+    case 'APPLY_RETRY_READY':
+      return requireState(current, ['APPLYING_CHANGES'], event, 'AWAITING_APPLY_APPROVAL');
     case 'CHANGES_APPLIED':
       return requireState(current, ['APPLYING_CHANGES'], event, 'COMPLETED');
     default: {
@@ -162,7 +164,11 @@ export const transitionWorkflow = (
   if (event.type === 'TASK_PAUSED' || event.type === 'FATAL_ERROR') {
     next.statusMessage = event.reason;
   }
-  if (event.type === 'TASK_RESUMED' || event.type === 'WORKER_RETRY_STARTED') {
+  if (
+    event.type === 'TASK_RESUMED' ||
+    event.type === 'WORKER_RETRY_STARTED' ||
+    event.type === 'APPLY_RETRY_READY'
+  ) {
     delete next.statusMessage;
   }
 

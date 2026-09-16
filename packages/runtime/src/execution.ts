@@ -45,6 +45,7 @@ export interface RuntimeExecutionDependencies {
     strategy: 'cancel' | 'head-worktree' | 'include-tracked',
   ) => Promise<ExecutionWorkspace>;
   readonly collectDiff: (workspace: ExecutionWorkspace) => Promise<RuntimeWorkspaceDiff>;
+  readonly validateApplyBaseline: (workspace: ExecutionWorkspace) => Promise<void>;
   readonly runQualityGates: (
     workspacePath: string,
     diff: RuntimeWorkspaceDiff,
@@ -199,16 +200,22 @@ export class NativeExecutionCoordinator {
       case 'PAUSED': {
         if (this.isFailedInitialWorkerPause(snapshot)) {
           const workspace = snapshot.workspace;
-          if (workspace !== undefined) {
-            const diff = await this.options.collectDiff(workspace);
-            if (diff.changedFiles.length === 0) {
-              return {
-                ...base,
-                nextAction: 'START_WORKER',
-                message:
-                  'The initial worker provider failed before producing changes. After the provider issue is fixed, explicitly retry the worker with the same approved plan hash and preserved workspace.',
-              };
-            }
+          if (workspace === undefined) {
+            return {
+              ...base,
+              nextAction: 'START_WORKER',
+              message:
+                'The worker failed its preflight before a workspace or execution was created. After the provider issue is fixed, explicitly retry with the same approved plan hash.',
+            };
+          }
+          const diff = await this.options.collectDiff(workspace);
+          if (diff.changedFiles.length === 0) {
+            return {
+              ...base,
+              nextAction: 'START_WORKER',
+              message:
+                'The initial worker provider failed before producing changes. After the provider issue is fixed, explicitly retry the worker with the same approved plan hash and preserved workspace.',
+            };
           }
         }
         const reviewPacket = await this.optionalPausedReviewPacket(snapshot);
@@ -228,12 +235,57 @@ export class NativeExecutionCoordinator {
           message:
             'The worker requires a user decision. Inspect the persisted blocker before continuing.',
         };
+      case 'APPLYING_CHANGES': {
+        const workspace = snapshot.workspace;
+        const diff =
+          workspace === undefined ? undefined : await this.options.collectDiff(workspace);
+        const finalReview = snapshot.lastReviewDecision;
+        const canRequestFreshApproval =
+          workspace?.mode !== 'current' &&
+          workspace?.status === 'READY' &&
+          approvedPlanHash !== undefined &&
+          diff !== undefined &&
+          snapshot.lastWorkerIteration?.diffHash === diff.hash &&
+          snapshot.lastWorkerIteration.result !== undefined &&
+          snapshot.latestQualityGateReport?.status === 'PASSED' &&
+          finalReview?.phase === 'FINAL' &&
+          finalReview.decision.verdict === 'APPROVED';
+        if (canRequestFreshApproval) {
+          try {
+            await this.options.validateApplyBaseline(workspace);
+            const awaiting = await this.transition(snapshot.session, {type: 'APPLY_RETRY_READY'});
+            const reviewPacket = await this.reviewPacketFromSnapshot(
+              {...snapshot, session: awaiting},
+              'APPLY',
+            );
+            return {
+              ...base,
+              session: awaiting,
+              approvedPlanHash,
+              nextAction: 'REQUEST_APPLY_APPROVAL',
+              message:
+                'The interrupted apply was not completed. Its source baseline and reviewed diff still match; request a fresh explicit apply approval before retrying.',
+              reviewPacket,
+            };
+          } catch {
+            // Fall through to manual recovery when the original apply conditions no longer hold.
+          }
+        }
+        const reason =
+          'The interrupted apply cannot be safely retried because its workspace, source baseline, reviewed diff, or final approval no longer matches.';
+        const paused = await this.transition(snapshot.session, {type: 'TASK_PAUSED', reason});
+        return {
+          ...base,
+          session: paused,
+          nextAction: 'MANUAL_RECOVERY',
+          message: reason,
+        };
+      }
       case 'PREPARING_WORKSPACE':
       case 'EXECUTING_WORKER':
       case 'RUNNING_QUALITY_GATES':
       case 'REPAIRING_MECHANICAL_FAILURES':
-      case 'REVISING_IMPLEMENTATION':
-      case 'APPLYING_CHANGES': {
+      case 'REVISING_IMPLEMENTATION': {
         const reason = `Runtime restarted while ${snapshot.session.state} was in progress. The isolated workspace was preserved; Agent Foreman will not silently replay a potentially non-idempotent operation.`;
         const paused = await this.transition(snapshot.session, {type: 'TASK_PAUSED', reason});
         return {
@@ -273,22 +325,28 @@ export class NativeExecutionCoordinator {
             'Only a failed initial worker call can be retried from the PAUSED state.',
           );
         }
-        if (snapshot.workspace === undefined) {
-          throw new ConfigurationError('The paused worker retry has no preserved workspace.');
-        }
-        workspace = snapshot.workspace;
-        const retryDiff = await this.options.collectDiff(workspace);
-        if (retryDiff.changedFiles.length > 0) {
-          throw new ConfigurationError(
-            'The paused worker workspace contains changes and cannot be retried automatically.',
-            {diagnostics: {changedFiles: retryDiff.changedFiles.map(({path}) => path)}},
-          );
-        }
         loopGuard = this.loopGuardFromSnapshot(snapshot);
         this.assertIterationAvailable(current, true);
-        current = await this.transition(current, {
-          type: 'WORKER_RETRY_STARTED',
-        });
+        if (snapshot.workspace === undefined) {
+          current = await this.transition(current, {
+            type: 'TASK_RESUMED',
+            resumeState: 'PLAN_APPROVED',
+          });
+          current = await this.transition(current, {type: 'WORKSPACE_PREPARATION_STARTED'});
+          workspace = await this.options.prepareWorkspace(current, workspaceStrategy);
+          await this.options.store.recordWorkspace(current.id, workspace);
+          current = await this.transition(current, {type: 'WORKSPACE_READY', workspace});
+        } else {
+          workspace = snapshot.workspace;
+          const retryDiff = await this.options.collectDiff(workspace);
+          if (retryDiff.changedFiles.length > 0) {
+            throw new ConfigurationError(
+              'The paused worker workspace contains changes and cannot be retried automatically.',
+              {diagnostics: {changedFiles: retryDiff.changedFiles.map(({path}) => path)}},
+            );
+          }
+          current = await this.transition(current, {type: 'WORKER_RETRY_STARTED'});
+        }
       } else {
         throw new ConfigurationError(
           'Worker start requires PLAN_APPROVED or a safely retryable PAUSED state.',
@@ -526,6 +584,7 @@ export class NativeExecutionCoordinator {
     if (session.state !== 'APPLYING_CHANGES') {
       throw new ConfigurationError('Changes can only be applied from APPLYING_CHANGES.');
     }
+    await this.options.validateApplyBaseline(workspace);
     const result = await this.options.applyChanges(workspace);
     await this.options.store.recordWorkspace(session.id, result.workspace);
     const completed = await this.transition(session, {
@@ -533,6 +592,10 @@ export class NativeExecutionCoordinator {
       workspace: result.workspace,
     });
     return {session: completed, workspace: result.workspace, diff: result.diff};
+  }
+
+  public async validateApplyBaseline(workspace: ExecutionWorkspace): Promise<void> {
+    await this.options.validateApplyBaseline(workspace);
   }
 
   private async gateToReview(
@@ -811,14 +874,22 @@ export class NativeExecutionCoordinator {
     const lastPause = [...snapshot.events]
       .reverse()
       .find(({event}) => event.type === 'TASK_PAUSED');
-    return (
-      snapshot.session.state === 'PAUSED' &&
+    const hasApprovedPlan = snapshot.approvedPlan?.hash !== undefined;
+    const failedBeforeWorkspace =
+      lastPause?.previousState === 'PLAN_APPROVED' &&
+      snapshot.workspace === undefined &&
+      snapshot.lastProviderExecution === undefined &&
+      snapshot.lastWorkerIteration === undefined;
+    const failedDuringInitialExecution =
       lastPause?.previousState === 'EXECUTING_WORKER' &&
       snapshot.workspace !== undefined &&
-      snapshot.approvedPlan?.hash !== undefined &&
       snapshot.lastProviderExecution?.status === 'FAILED' &&
       snapshot.lastWorkerIteration?.kind === 'INITIAL' &&
-      snapshot.lastWorkerIteration.result === undefined
+      snapshot.lastWorkerIteration.result === undefined;
+    return (
+      snapshot.session.state === 'PAUSED' &&
+      hasApprovedPlan &&
+      (failedBeforeWorkspace || failedDuringInitialExecution)
     );
   }
 

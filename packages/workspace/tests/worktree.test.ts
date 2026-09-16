@@ -81,6 +81,44 @@ describe('Git execution workspace', () => {
     expect(await readFile(path.join(fixture.root, 'new file.txt'), 'utf8')).toBe('new\n');
   });
 
+  test('applies changes when the managed worktree is stored inside the source repository', async () => {
+    const dataDirectory = path.join(fixture.root, 'data', 'agent-foreman');
+    const workspace = await prepareGitWorkspace({
+      projectRoot: fixture.root,
+      taskId: 'task-nested-data',
+      dataDirectory,
+      dirtyStrategy: 'cancel',
+    });
+    await writeFile(path.join(workspace.path, 'source.txt'), 'implemented in nested worktree\n');
+
+    await expect(
+      applyWorkspaceChanges({workspace, sourceProjectRoot: fixture.root, approved: true}),
+    ).resolves.toMatchObject({workspace: {status: 'APPLIED'}});
+    expect(await readFile(path.join(fixture.root, 'source.txt'), 'utf8')).toBe(
+      'implemented in nested worktree\n',
+    );
+  });
+
+  test('still detects unrelated untracked source changes beside a nested managed worktree', async () => {
+    const dataDirectory = path.join(fixture.root, 'data', 'agent-foreman');
+    const workspace = await prepareGitWorkspace({
+      projectRoot: fixture.root,
+      taskId: 'task-nested-data-conflict',
+      dataDirectory,
+      dirtyStrategy: 'cancel',
+    });
+    await writeFile(path.join(workspace.path, 'source.txt'), 'worker change\n');
+    await writeFile(path.join(fixture.root, 'user-notes.txt'), 'keep this untracked file\n');
+
+    await expect(
+      applyWorkspaceChanges({workspace, sourceProjectRoot: fixture.root, approved: true}),
+    ).rejects.toBeInstanceOf(ApplyConflictError);
+    expect(await readFile(path.join(fixture.root, 'source.txt'), 'utf8')).toBe('baseline\n');
+    expect(await readFile(path.join(fixture.root, 'user-notes.txt'), 'utf8')).toBe(
+      'keep this untracked file\n',
+    );
+  });
+
   test('uses canonical path identities for symlinked repositories and worktree data', async () => {
     await mkdir(fixture.dataDirectory, {recursive: true});
     const fixtureRoot = path.dirname(fixture.root);
