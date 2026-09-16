@@ -19,6 +19,7 @@ import {
   collectWorkspaceDiff,
   prepareGitWorkspace,
   prepareSnapshotWorkspace,
+  validateWorkspaceApply,
 } from '@agent-foreman/workspace';
 
 import {summarizeRepository} from '../workflow/repository-summary.js';
@@ -83,6 +84,9 @@ export const runMcpServerCommand = async (): Promise<void> => {
     collectDiff: async (workspace) => {
       const diff = await collectWorkspaceDiff(workspace);
       return {...diff, changedFiles: [...diff.changedFiles]};
+    },
+    validateApplyBaseline: async (workspace) => {
+      await validateWorkspaceApply(workspace, projectRoot);
     },
     runQualityGates: async (workspacePath, diff, approvedPlan) => {
       const command = await runQualityGates({

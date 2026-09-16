@@ -115,6 +115,13 @@ const inspectSkillInstallation = async (
       {cause, diagnostics: {destination}},
     );
   }
+  const installedHash = await hashSkillDirectory(destination, new Set([markerName]));
+  if (installedHash !== marker.contentHash) {
+    throw new ConfigurationError(
+      `Refusing to overwrite the modified Codex skill at ${destination}. Back up your local changes before reinstalling.`,
+      {diagnostics: {destination}},
+    );
+  }
   return {
     destination,
     contentHash,

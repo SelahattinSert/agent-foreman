@@ -143,6 +143,31 @@ describe('Codex skill and MCP setup', () => {
     expect(run.mock.calls.filter(([call]) => call.args?.[1] === 'add')).toHaveLength(1);
   });
 
+  test.each([false, true])(
+    'preserves locally edited managed skills (package updated: %s)',
+    async (updatePackage) => {
+      const root = await mkdtemp(path.join(tmpdir(), 'agent-foreman-setup-edited-'));
+      const skillSourceDirectory = await createSkillSource(root);
+      const codexHome = path.join(root, 'codex-home');
+      const run = vi.fn(async (input: ProcessRunInput) =>
+        input.args?.[1] === 'get'
+          ? processResult(1, '', "Error: No MCP server named 'agent-foreman' found.")
+          : processResult(0),
+      );
+      const input = {codexHome, skillSourceDirectory, ...runtimePaths(root), run};
+      await setupCodexIntegration(input);
+      const installed = path.join(codexHome, 'skills', 'agent-foreman', 'SKILL.md');
+      await writeFile(installed, 'User-owned local customization');
+      if (updatePackage)
+        await writeFile(path.join(skillSourceDirectory, 'SKILL.md'), 'New release');
+      run.mockClear();
+
+      await expect(setupCodexIntegration(input)).rejects.toThrow(/modified/iu);
+      expect(await readFile(installed, 'utf8')).toBe('User-owned local customization');
+      expect(run).not.toHaveBeenCalled();
+    },
+  );
+
   test('refuses to overwrite an unmanaged skill', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'agent-foreman-setup-'));
     const skillSourceDirectory = await createSkillSource(root);

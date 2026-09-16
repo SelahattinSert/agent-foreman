@@ -49,6 +49,7 @@ import type {
 } from '@agent-foreman/persistence';
 
 import type {NativeExecutionCoordinator} from './execution.js';
+import {canonicalizeProjectRoot, sameProjectRoot} from './project-root.js';
 
 export type ConfirmationSource = 'tty' | 'mcp-user-confirmation' | 'skill';
 
@@ -115,12 +116,29 @@ export class HeadlessRuntimeService {
 
   public async sessionCreate(rawInput: SessionCreateInput): Promise<TaskSession> {
     const input = SessionCreateInputSchema.parse(rawInput);
-    const projectRoot = path.resolve(input.projectRoot);
-    if (this.allowedProjectRoot !== undefined && projectRoot !== this.allowedProjectRoot) {
-      throw new PermissionDeniedError(
-        'The MCP runtime may create sessions only for its configured project root.',
-        {diagnostics: {projectRoot, allowedProjectRoot: this.allowedProjectRoot}},
-      );
+    let projectRoot = path.resolve(input.projectRoot);
+    if (this.allowedProjectRoot !== undefined) {
+      const message = 'The MCP runtime may create sessions only for its configured project root.';
+      let canonicalProjectRoot: string;
+      let canonicalAllowedProjectRoot: string;
+      try {
+        [canonicalProjectRoot, canonicalAllowedProjectRoot] = await Promise.all([
+          canonicalizeProjectRoot(projectRoot),
+          canonicalizeProjectRoot(this.allowedProjectRoot),
+        ]);
+      } catch (cause: unknown) {
+        throw new PermissionDeniedError(message, {
+          cause,
+          diagnostics: {projectRoot, allowedProjectRoot: this.allowedProjectRoot},
+        });
+      }
+      if (!sameProjectRoot(canonicalProjectRoot, canonicalAllowedProjectRoot)) {
+        throw new PermissionDeniedError(message, {
+          diagnostics: {projectRoot, allowedProjectRoot: this.allowedProjectRoot},
+        });
+      }
+      // Keep sessions and downstream process paths on the same spelling the MCP server uses.
+      projectRoot = this.allowedProjectRoot;
     }
     const timestamp = this.now();
     const session: TaskSession = {
@@ -356,6 +374,7 @@ export class HeadlessRuntimeService {
     ) {
       throw new PlanHashMismatchError('The apply request does not match the source baseline.');
     }
+    await this.execution.validateApplyBaseline(current.workspace);
     const createdAt = this.now();
     const challenge = ApprovalChallengeSchema.parse({
       schemaVersion: 1,
@@ -404,6 +423,7 @@ export class HeadlessRuntimeService {
         'The current diff or source baseline changed after apply review.',
       );
     }
+    await this.execution.validateApplyBaseline(current.workspace);
     const consumedAt = this.now();
     const challengeConsumption = {
       challengeId: input.challengeId,

@@ -28,7 +28,7 @@ const writeWorkerFixture = async (root: string): Promise<string> => {
       "const fs = await import('node:fs');",
       'const args = process.argv.slice(2);',
       "if (args[0] === '--version') fs.writeSync(1, '1.1.8');",
-      "else if (args[0] === 'models') fs.writeSync(1, args.includes('--help') ? 'List available models' : 'configured-worker-model\\nother-model\\n');",
+      "else if (args[0] === 'models') fs.writeSync(1, args.includes('--help') ? 'List available models' : 'configured-worker-model\\tConfigured Worker Model\\nother-model\\tOther Model\\n');",
       "else if (args.includes('--help')) fs.writeSync(1, '--print --output-format json --json-schema --model --mode accept-edits --sandbox --conversation --effort --print-timeout --new-project --disable-slash-commands --log-file');",
       'else {',
       "  const path = await import('node:path');",
@@ -405,6 +405,17 @@ describe('Gemini/Antigravity worker adapter', () => {
       status: 'FAIL',
       diagnostics: {configuredModel: 'missing-model'},
     });
+  });
+
+  test('parses Antigravity model IDs and display names from tabular model output', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'agent-foreman-worker-models-'));
+    const binary = await writeWorkerFixture(root);
+    const provider = new AntigravityCliWorkerProvider({binary, probe: async () => probeResult});
+
+    await expect(provider.discoverModels()).resolves.toEqual([
+      {id: 'configured-worker-model', displayName: 'Configured Worker Model', available: true},
+      {id: 'other-model', displayName: 'Other Model', available: true},
+    ]);
   });
 
   test('supports a safe array args template without shell interpolation', async () => {

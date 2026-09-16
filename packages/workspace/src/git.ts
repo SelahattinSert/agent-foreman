@@ -25,6 +25,11 @@ export interface NonGitDiscovery {
 
 export type RepositoryDiscovery = GitRepositoryDiscovery | NonGitDiscovery;
 
+export interface GitDiscoveryOptions {
+  /** Managed Git worktree paths to exclude from the source repository's untracked status fingerprint. */
+  readonly excludeUntrackedPaths?: readonly string[];
+}
+
 export const runGit = async (
   cwd: string,
   args: readonly string[],
@@ -54,7 +59,38 @@ export const requireGit = async (
 
 const nulList = (value: string): readonly string[] => value.split('\0').filter(Boolean);
 
-export const discoverGitRepository = async (projectRoot: string): Promise<RepositoryDiscovery> => {
+const statusForFingerprint = (
+  status: string,
+  projectRoot: string,
+  excludedPaths: readonly string[],
+): string => {
+  const excludedRelativePaths = new Set(
+    excludedPaths
+      .map((excludedPath) => path.relative(projectRoot, path.resolve(excludedPath)))
+      .filter(
+        (relativePath) =>
+          relativePath !== '' &&
+          relativePath !== '..' &&
+          !relativePath.startsWith(`..${path.sep}`) &&
+          !path.isAbsolute(relativePath),
+      )
+      .map((relativePath) => relativePath.split(path.sep).join('/')),
+  );
+  if (excludedRelativePaths.size === 0) return status;
+
+  const records = status.split('\0').filter(Boolean);
+  const fingerprintRecords = records.filter((record) => {
+    if (!record.startsWith('?? ')) return true;
+    const relativePath = record.slice(3).replace(/\/$/u, '');
+    return !excludedRelativePaths.has(relativePath);
+  });
+  return fingerprintRecords.length === 0 ? '' : `${fingerprintRecords.join('\0')}\0`;
+};
+
+export const discoverGitRepository = async (
+  projectRoot: string,
+  options: GitDiscoveryOptions = {},
+): Promise<RepositoryDiscovery> => {
   const requestedRoot = path.resolve(projectRoot);
   const rootResult = await runGit(requestedRoot, ['rev-parse', '--show-toplevel']);
   if (rootResult.exitCode !== 0) return {kind: 'none', projectRoot: requestedRoot};
@@ -71,12 +107,17 @@ export const discoverGitRepository = async (projectRoot: string): Promise<Reposi
   const gitCommonDirectory = await realpath(path.resolve(resolvedRoot, commonValue));
   const headRevision = headRaw.trim();
   const branch = branchResult.exitCode === 0 ? branchResult.stdout.trim() : undefined;
+  const fingerprintStatus = statusForFingerprint(
+    status,
+    resolvedRoot,
+    options.excludeUntrackedPaths ?? [],
+  );
   const baselineFingerprint = createHash('sha256')
     .update(headRevision)
     .update('\0')
     .update(branch ?? '')
     .update('\0')
-    .update(status)
+    .update(fingerprintStatus)
     .digest('hex');
   return {
     kind: 'git',

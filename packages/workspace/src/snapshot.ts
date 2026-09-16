@@ -273,15 +273,12 @@ const sameFileSet = (left: readonly SnapshotFile[], right: readonly SnapshotFile
   return left.every((file) => rightMap.get(file.path) === file.sha256);
 };
 
-export const applySnapshotWorkspaceChanges = async (input: {
-  readonly workspace: ExecutionWorkspace;
-  readonly sourceProjectRoot: string;
-  readonly approved: boolean;
-}): Promise<ApplyWorkspaceChangesResult> => {
-  if (!input.approved)
-    throw new PermissionDeniedError('Changes require explicit user apply approval.');
-  const manifest = await readManifest(input.workspace);
-  const sourceRoot = await canonicalPath(input.sourceProjectRoot);
+const readAndValidateSnapshotBaseline = async (
+  workspace: ExecutionWorkspace,
+  sourceProjectRoot: string,
+): Promise<{readonly manifest: SnapshotManifest; readonly sourceRoot: string}> => {
+  const manifest = await readManifest(workspace);
+  const sourceRoot = await canonicalPath(sourceProjectRoot);
   const recordedSourceRoot = await canonicalPath(manifest.sourceProjectRoot);
   if (sourceRoot !== recordedSourceRoot) {
     throw new ApplyConflictError('Snapshot apply target does not match its recorded source.');
@@ -290,6 +287,32 @@ export const applySnapshotWorkspaceChanges = async (input: {
   if (!sameFileSet(manifest.files, source.files)) {
     throw new ApplyConflictError('Source files changed after the snapshot was created.');
   }
+  return {manifest, sourceRoot};
+};
+
+export const validateSnapshotWorkspaceApply = async (
+  workspace: ExecutionWorkspace,
+  sourceProjectRoot: string,
+): Promise<void> => {
+  if (workspace.mode !== 'snapshot') {
+    throw new WorkspacePreparationError(
+      'A snapshot workspace is required for this apply validation.',
+    );
+  }
+  await readAndValidateSnapshotBaseline(workspace, sourceProjectRoot);
+};
+
+export const applySnapshotWorkspaceChanges = async (input: {
+  readonly workspace: ExecutionWorkspace;
+  readonly sourceProjectRoot: string;
+  readonly approved: boolean;
+}): Promise<ApplyWorkspaceChangesResult> => {
+  if (!input.approved)
+    throw new PermissionDeniedError('Changes require explicit user apply approval.');
+  const {sourceRoot} = await readAndValidateSnapshotBaseline(
+    input.workspace,
+    input.sourceProjectRoot,
+  );
   const diff = await collectSnapshotWorkspaceDiff(input.workspace);
   const sensitiveChanges = diff.changedFiles.filter(({path: filePath}) =>
     sensitivePathPattern.test(filePath),
