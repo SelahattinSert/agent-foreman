@@ -1,3 +1,7 @@
+import {mkdir, mkdtemp, realpath, rm, symlink} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+
 import {describe, expect, test} from 'vitest';
 
 import type {TaskPlan} from '@agent-foreman/contracts';
@@ -91,6 +95,60 @@ describe('HeadlessRuntimeService control plane', () => {
     });
     expect(session).not.toHaveProperty('userRequest');
     await expect(store.listEvents(session.id)).resolves.toHaveLength(1);
+  });
+
+  test('accepts a canonical alias of the configured project root', async () => {
+    const fixtureRoot = await mkdtemp(path.join(tmpdir(), 'agent-foreman-runtime-root-'));
+    const configuredRoot = path.join(fixtureRoot, 'project-alias');
+    const actualRoot = path.join(fixtureRoot, 'project');
+    await mkdir(actualRoot);
+    await symlink(actualRoot, configuredRoot, process.platform === 'win32' ? 'junction' : 'dir');
+
+    const store = new InMemoryWorkflowStore();
+    const service = new HeadlessRuntimeService({
+      store,
+      workerProvider: 'fixture-worker',
+      allowedProjectRoot: configuredRoot,
+    });
+
+    try {
+      const session = await service.sessionCreate({
+        projectRoot: await realpath(actualRoot),
+        frontendProvider: 'codex-native',
+        profileName: 'balanced',
+      });
+
+      expect(session.projectRoot).toBe(path.resolve(configuredRoot));
+    } finally {
+      await rm(fixtureRoot, {recursive: true, force: true});
+    }
+  });
+
+  test('rejects a different project root when the MCP runtime is root-scoped', async () => {
+    const fixtureRoot = await mkdtemp(path.join(tmpdir(), 'agent-foreman-runtime-root-'));
+    const configuredRoot = path.join(fixtureRoot, 'project');
+    const otherRoot = path.join(fixtureRoot, 'other-project');
+    await Promise.all([mkdir(configuredRoot), mkdir(otherRoot)]);
+
+    const store = new InMemoryWorkflowStore();
+    const service = new HeadlessRuntimeService({
+      store,
+      workerProvider: 'fixture-worker',
+      allowedProjectRoot: configuredRoot,
+    });
+
+    try {
+      await expect(
+        service.sessionCreate({
+          projectRoot: otherRoot,
+          frontendProvider: 'codex-native',
+          profileName: 'balanced',
+        }),
+      ).rejects.toThrow('only for its configured project root');
+      await expect(store.listSessions()).resolves.toHaveLength(0);
+    } finally {
+      await rm(fixtureRoot, {recursive: true, force: true});
+    }
   });
 
   test('submits a matching draft and advances planning without a worker', async () => {
